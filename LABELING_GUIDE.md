@@ -144,11 +144,14 @@ project owner so it can be removed.
 
 ## 6. Calibration round (before splitting the work)
 
-Everyone labels the **same 3 videos** on their own, without talking about them:
+Everyone labels the **same 3 videos** on their own, without talking about them. The videos
+are listed in `eval/calibration/videos.txt`. Nobody has labeled them yet, so nobody sees
+anyone else's marks first.
 
 ```bash
 # 1. label the 3 calibration videos in the dashboard and tick "Finished"
-# 2. move your labels into your calibration folder and commit them
+# 2. move your labels for THOSE videos into your calibration folder and commit them
+#    (it only ever touches the videos in videos.txt, never anyone else's labels)
 python tools/compare_labels.py --save YOURNAME
 git add eval/calibration/YOURNAME && git commit -m "Calibration labels: YOURNAME" && git push
 # 3. once everyone has pushed, compare any two people
@@ -160,6 +163,10 @@ The comparison lists every theft only one person marked, every theft marked at a
 moment or with a different type, and how much your shelf zones overlap. **Talk through every
 difference** and update this guide where a rule was unclear. Aim for **90%+ agreement**
 before splitting up the remaining videos.
+
+Afterwards the project owner picks the agreed version of each calibration video, copies it
+from `eval/calibration/<name>/` back into `eval/labels/` (fixing anything discussed), and
+pushes it, so those 3 videos count in the score too.
 
 ---
 

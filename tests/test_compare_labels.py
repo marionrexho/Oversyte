@@ -16,15 +16,20 @@ def write(d: Path, name: str, events, shelf=SHELF, done=True):
         {"events": events, "scenes": [{"start": 0, "shelf": shelf, "ignore": []}], "done": done}))
 
 
-def test_save_moves_only_finished(tmp_path, monkeypatch, capsys):
+def test_save_moves_only_finished_calibration_videos(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(cl, "LABELS", tmp_path / "labels")
     monkeypatch.setattr(cl, "CALIB", tmp_path / "calibration")
+    (tmp_path / "calibration").mkdir()
+    (tmp_path / "calibration" / "videos.txt").write_text("# calibration\na.mp4\nb.mp4\n")
     write(tmp_path / "labels", "a.mp4", [])
     write(tmp_path / "labels", "b.mp4", [], done=False)
+    write(tmp_path / "labels", "someone_elses.mp4", [])            # finished, but not a calibration video
     assert cl.save("alex") == 0
     assert (tmp_path / "calibration" / "alex" / "a.mp4.json").exists()
     assert not (tmp_path / "labels" / "a.mp4.json").exists()      # moved, not copied
     assert (tmp_path / "labels" / "b.mp4.json").exists()           # unfinished stays
+    assert (tmp_path / "labels" / "someone_elses.mp4.json").exists()  # never touched
+    assert "b.mp4" in capsys.readouterr().out                      # told it's not finished
 
 
 def test_compare_reports_differences(tmp_path, monkeypatch, capsys):

@@ -31,16 +31,35 @@ MATCH_SECONDS = 2.0   # same theft if marked within this many seconds
 TIMING_OK = 1.0       # closer than this counts as the same moment
 
 
+def calibration_videos() -> list[str]:
+    """The agreed calibration videos, one file name per line in eval/calibration/videos.txt."""
+    f = CALIB / "videos.txt"
+    if not f.exists():
+        return []
+    return [ln.strip() for ln in f.read_text(encoding="utf-8").splitlines()
+            if ln.strip() and not ln.startswith("#")]
+
+
 def save(name: str) -> int:
+    videos = calibration_videos()
+    if not videos:
+        print(f"No calibration videos listed. Put their file names in {CALIB / 'videos.txt'} (one per line).")
+        return 1
     dest = CALIB / name
     dest.mkdir(parents=True, exist_ok=True)
-    moved = []
-    for f in sorted(LABELS.glob("*.json")):
-        if json.loads(f.read_text(encoding="utf-8")).get("done"):
+    moved, missing = [], []
+    for v in videos:  # only the calibration videos: never anyone else's labels
+        f = LABELS / f"{v}.json"
+        if f.exists() and json.loads(f.read_text(encoding="utf-8")).get("done"):
             shutil.move(str(f), dest / f.name)
-            moved.append(f.stem)
+            moved.append(v)
+        else:
+            missing.append(v)
+    if missing:
+        print("Not finished yet (label them and tick 'Finished labeling this video'):")
+        for m in missing:
+            print("   ", m)
     if not moved:
-        print("No finished labels found. Tick 'Finished labeling this video' first.")
         return 1
     shown = dest.relative_to(ROOT) if dest.is_relative_to(ROOT) else dest
     print(f"Moved {len(moved)} finished label file(s) to {shown}:")
