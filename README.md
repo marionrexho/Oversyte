@@ -16,6 +16,8 @@ dashboard (PWA). It runs on an ordinary computer in the store, with no GPU and n
                                                                                                  Theft / False alarm
 ```
 
+
+
 ## Quick start (Windows, macOS or Linux, Python 3.10+)
 
 ```bash
@@ -26,7 +28,7 @@ pip install -r requirements.txt
 python run.py                     # first run creates config.yaml, then downloads the AI models (~12 MB)
 ```
 
-Open http://localhost:8000 and sign in with the `dashboard_password` from `config.yaml`
+Open [http://localhost:8000](http://localhost:8000) and sign in with the `dashboard_password` from `config.yaml`
 (default `change-me`, so change it).
 
 The example config uses webcam `0`, so you can try it right away: stand in front of the
@@ -48,18 +50,18 @@ cameras:
     source: "rtsp://USER:PASS@192.168.1.65:554/cam/realmonitor?channel=1&subtype=1"
 ```
 
-* Nearly every IP camera and NVR/DVR exposes **RTSP**. Common URL formats:
-  Hikvision `/Streaming/Channels/102`, Dahua/Amcrest `/cam/realmonitor?channel=1&subtype=1`,
-  Reolink `/h264Preview_01_sub`, Uniview `/unicast/c1/s1/live`.
-* Use the camera's **sub-stream** (lower resolution). It's plenty for detection and much
-  lighter on CPU.
-* A video file also works as a source (`loop: true` replays it), which is handy for demos and testing.
+- Nearly every IP camera and NVR/DVR exposes **RTSP**. Common URL formats:
+Hikvision `/Streaming/Channels/102`, Dahua/Amcrest `/cam/realmonitor?channel=1&subtype=1`,
+Reolink `/h264Preview_01_sub`, Uniview `/unicast/c1/s1/live`.
+- Use the camera's **sub-stream** (lower resolution). It's plenty for detection and much
+lighter on CPU.
+- A video file also works as a source (`loop: true` replays it), which is handy for demos and testing.
 
 Then open **Cameras → (camera) → Edit zones** and draw:
 
-* **Shelf zones** over each shelf face the camera sees. This is the biggest accuracy
-  improvement: a "reach" only counts when the hand enters a shelf zone.
-* **Ignore zones** over areas like behind the counter, so staff aren't flagged.
+- **Shelf zones** over each shelf face the camera sees. This is the biggest accuracy
+improvement: a "reach" only counts when the hand enters a shelf zone.
+- **Ignore zones** over areas like behind the counter, so staff aren't flagged.
 
 The live view colours each person by state: grey idle, yellow reaching, orange holding an item, red concealing.
 
@@ -68,26 +70,30 @@ The live view colours each person by state: grey idle, yellow reaching, orange h
 Alerts are standard Web Push notifications from the dashboard, so there's no app store and no fees.
 
 1. Phones need to reach the dashboard over **HTTPS** (browsers only allow push on secure sites).
-   The easiest option is a free [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/):
+  The easiest option is a free [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/):
    `cloudflared tunnel --url http://localhost:8000` gives a public `https://…` address
    (use a named tunnel for a permanent one). Tailscale Funnel works too.
    Set `public_url` in `config.yaml` to that address.
 2. On each owner/staff phone, open that address and sign in.
-   * **iPhone (iOS 16.4+):** Share → **Add to Home Screen**, open Oversyte from the home screen,
-     then Settings → **Turn on theft alerts**.
-   * **Android:** Settings → **Turn on theft alerts** (optionally "Install app" from the browser menu).
+  - **iPhone (iOS 16.4+):** Share → **Add to Home Screen**, open Oversyte from the home screen,
+   then Settings → **Turn on theft alerts**.
+  - **Android:** Settings → **Turn on theft alerts** (optionally "Install app" from the browser menu).
 3. Press **Send a test alert**. Tapping the notification opens the clip.
+
+
 
 ## How detection works
 
 `oversyte/concealment.py` runs a per-person, per-hand state machine on pose keypoints:
 
-| Step | Signal |
-|---|---|
-| Reach | wrist inside a shelf zone for ≥ `reach_min_seconds` (no zones drawn: arm extended away from the body) |
-| Carry | wrist leaves the shelf |
+
+| Step    | Signal                                                                                                                                        |
+| ------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| Reach   | wrist inside a shelf zone for ≥ `reach_min_seconds` (no zones drawn: arm extended away from the body)                                         |
+| Carry   | wrist leaves the shelf                                                                                                                        |
 | Conceal | within `conceal_window_seconds`, wrist goes to a **pocket** (hip level), **waistband**, or **into a bag** and stays ≥ `conceal_dwell_seconds` |
-| Score | bag 0.75 · pocket 0.60 · waistband 0.45, +0.10 if a product was seen in the hand, +0.15 more if it's gone afterwards |
+| Score   | bag 0.75 · pocket 0.60 · waistband 0.45, +0.10 if a product was seen in the hand, +0.15 more if it's gone afterwards                          |
+
 
 An alert fires when the score reaches `alert_threshold` (default 0.6). Each person can trigger
 at most one alert per `person_cooldown_seconds`. Normal shopping (picking up an item, reading
@@ -105,31 +111,16 @@ For a 4–8 camera store, use a mini-PC with a recent Intel/AMD CPU, or an NVIDI
 ## Measuring accuracy (Accuracy lab)
 
 1. **Add test videos:** dashboard → Settings → **Accuracy lab** → *Upload videos*, or copy files into
-   `eval/videos/`. Recorder exports in H.265 are converted for the browser automatically.
+  `eval/videos/`. Recorder exports in H.265 are converted for the browser automatically.
 2. **Label each one:** mark the moment every item disappears (keys `1`–`5`, Space plays and pauses,
-   ←/→ jump 2 s, Shift+←/→ step a little), draw the shelf zones, then tick **Finished labeling**.
+  ←/→ jump 2 s, Shift+←/→ step a little), draw the shelf zones, then tick **Finished labeling**.
    Videos with no theft are just as important, because they measure false alarms.
 3. **Score:** `python eval.py`. It prints the catch rate, false alarms per hour, a table of what each
-   `alert_threshold` would give, and every miss and false alarm. Open a video in the lab to see the
+  `alert_threshold` would give, and every miss and false alarm. Open a video in the lab to see the
    results on its timeline.
 
-The first run analyses each video at roughly real time. After that the AI output is cached in
+The first run analyses each video at roughly real time. After that the AI output is cached in  
 `eval/cache/`, so trying new thresholds, zones or rule changes re-scores in seconds.
-
-## Known limits of this MVP (honest list)
-
-* The heuristic sees **body motion, not the product**. Small items hidden in a closed hand,
-  and concealment that happens with the person's back to the camera, can be missed. Ceiling-mounted
-  cameras looking straight down make the pose estimate worse. Angled aisle views work best.
-* Everything is a 2-D image estimate. A hand passing *in front* of the hip can look like a
-  pocket. That's why every alert goes to a human with a clip.
-* The item detector only knows generic objects (bottles, cups, phones, food…), so it's a
-  bonus signal, not a requirement.
-
-**The path to real accuracy is already built in:** every Theft / False alarm tap labels a clip.
-**Settings → Download labeled clips** exports them with `labels.csv`, which becomes the training
-set for a learned action-recognition model (e.g. a skeleton-sequence classifier, or a video
-model like X3D/VideoMAE fine-tuned on these clips) that replaces or re-scores the heuristic.
 
 ## Project layout
 
