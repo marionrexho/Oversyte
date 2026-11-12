@@ -1,0 +1,49 @@
+# Oversyte configuration. Copy to config.yaml and edit.
+
+store_name: "My Store"
+
+# Everyone (owner + staff) signs in to the dashboard with this password.
+dashboard_password: "change-me"
+
+# The address phones use to reach the dashboard. Web push on phones needs HTTPS,
+# e.g. a Cloudflare Tunnel or Tailscale Funnel URL (see README).
+public_url: "http://localhost:8000"
+
+# Contact sent to push services with each notification (required by the Web Push spec).
+push_contact: "mailto:admin@example.com"
+
+data_dir: data
+
+server:
+  host: 0.0.0.0
+  port: 8000
+
+detection:
+  pose_model: models/yolo11n-pose.pt   # downloaded automatically on first run
+  object_model: models/yolo11n.pt      # finds bags and handheld items; set to null to save CPU
+  device: cpu
+  analysis_fps: 6            # frames analysed per second, per camera
+  imgsz: 640
+  person_conf: 0.4
+  object_conf: 0.25
+  reach_min_seconds: 0.25    # hand must stay in a shelf zone this long to count as a pick
+  conceal_window_seconds: 4  # after leaving the shelf, concealment must start within this time
+  conceal_dwell_seconds: 0.35 # hand must stay at pocket / waist / bag this long
+  alert_threshold: 0.6       # 0..1, lower means more alerts
+  person_cooldown_seconds: 30
+
+clips:
+  pre_seconds: 6     # video kept before the concealment moment
+  post_seconds: 3    # video kept after it
+  fps: 12
+  max_width: 960
+  retention_days: 30 # clips confirmed as theft are always kept
+
+cameras:
+  # source can be a webcam index (0), an RTSP URL, an HTTP/MJPEG URL or a video file.
+  # Most NVR/DVR brands: rtsp://USER:PASS@CAMERA_IP:554/...  (check your camera's docs)
+  - id: cam1
+    name: "Front aisle"
+    source: 0
+    # enabled: false   # keep the camera in the list but don't open it
+    # loop: true       # for video files: replay forever (handy for demos)

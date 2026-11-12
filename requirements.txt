@@ -1,0 +1,11 @@
+# Install CPU-only torch first (smaller, no CUDA):
+#   pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision
+ultralytics>=8.3
+lap
+fastapi>=0.110
+uvicorn[standard]
+python-multipart
+itsdangerous
+pywebpush
+imageio-ffmpeg
+pyyaml
