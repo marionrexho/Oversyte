@@ -27,9 +27,8 @@ pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision
 pip install -r requirements.txt
 python run.py                     # first run creates config.yaml, then downloads the AI models (~12 MB)
 ```
-
-Open [http://localhost:8000](http://localhost:8000) and sign in with the `dashboard_password` from `config.yaml`
-(default `change-me`, so change it).
+Open [http://localhost:8000](http://localhost:8000) and sign in with the [dashboard_password](config.yaml#6) from [config.yaml](config.yaml)
+(default [change-me](config.yaml#6), so change it).
 
 The example config uses webcam `0`, so you can try it right away: stand in front of the
 laptop camera, reach out to the side, then put your hand in your front pocket for half a
