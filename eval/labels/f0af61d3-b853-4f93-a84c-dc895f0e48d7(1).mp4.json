@@ -1,0 +1,18 @@
+{
+ "events": [
+  {
+   "t": 46.02,
+   "type": "waistband"
+  }
+ ],
+ "scenes": [
+  {
+   "start": 0.0,
+   "shelf": [],
+   "ignore": []
+  }
+ ],
+ "done": false,
+ "notes": "Duplicate video",
+ "labeled_by": "faaris"
+}
