@@ -7,9 +7,15 @@ models/
 # private / machine-specific: dashboard password, keys, alert clips, push subscriptions
 config.yaml
 data/
+demo/data/
+demo/eval/
+cloud-demo/
 
 # Accuracy lab: share labels and calibration labels only.
 # Videos show real customers and are large: share them through the team Google Drive.
 eval/*
 !eval/labels/
 !eval/calibration/
+!eval/video_names.json
+site/
+.vercel/

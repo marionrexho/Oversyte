@@ -1,6 +1,10 @@
-/* Oversyte service worker: receives theft alerts as push notifications. */
+/* Oversyte service worker: receives theft alerts as push notifications. v2 */
 self.addEventListener("install", () => self.skipWaiting());
-self.addEventListener("activate", (e) => e.waitUntil(self.clients.claim()));
+self.addEventListener("activate", (e) => e.waitUntil((async () => {
+  // never keep stale copies of the dashboard around
+  for (const k of await caches.keys()) await caches.delete(k);
+  await self.clients.claim();
+})()));
 
 // Network-only; present so browsers treat the dashboard as an installable app.
 self.addEventListener("fetch", () => {});

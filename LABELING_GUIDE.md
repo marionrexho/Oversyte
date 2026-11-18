@@ -23,9 +23,12 @@ pip install -r requirements.txt
 
 1. Copy `config.example.yaml` to `config.yaml` and set your own `dashboard_password`.
   Leave the camera at `enabled: false`; labeling doesn't need a live camera.
-2. Download the test videos from the team Google Drive into `eval/videos/`.
-  **Don't rename them.** Labels are matched to videos by file name. Watch out for the
-   browser adding `(1)` to a download name.
+2. Download the test videos from the team AWS bucket into `eval/videos/`. They're already
+  named `video-01.mp4`, `video-02.mp4`, …, so everyone can say "video 7" and mean the same clip.
+  **Don't rename them yourself.** Labels are matched to videos by file name.
+  If you still have videos with the old long names, push your labels, pull, then run
+  `python tools/rename_videos.py --apply`. It renames your videos, labels and AI cache to the
+  team names in `eval/video_names.json`.
 3. Start the dashboard with `python run.py`, open [http://localhost:8000](http://localhost:8000), and go to **Accuracy**.
 
 Videos are **never** committed to git (they're large and show real customers). Only the

@@ -10,6 +10,16 @@ from oversyte.config import load_config
 from oversyte.server import create_app
 
 
+class _HideBrowserHangups(logging.Filter):
+    """On Windows, every time a browser closes a connection early (reload, closed tab,
+    seeking in a video) Python logs a scary 'ConnectionResetError [WinError 10054]'.
+    It's harmless, so drop just that message; real errors still show."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        exc = record.exc_info[1] if record.exc_info else None
+        return not isinstance(exc, (ConnectionResetError, ConnectionAbortedError))
+
+
 def main():
     ap = argparse.ArgumentParser(description="Oversyte theft detection")
     ap.add_argument("--config", default="config.yaml")
@@ -21,6 +31,7 @@ def main():
         print(f"Created {cfg_path} from the example. Edit it to add your cameras.")
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    logging.getLogger("asyncio").addFilter(_HideBrowserHangups())
     cfg = load_config(cfg_path)
     if cfg["dashboard_password"] == "change-me":
         logging.warning("Dashboard password is still 'change-me'. Set dashboard_password in %s", cfg_path)

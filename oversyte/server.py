@@ -101,6 +101,16 @@ def create_app(cfg: dict) -> FastAPI:
                        same_site="lax", session_cookie="oversyte")
     app.state.engine, app.state.store = engine, store
 
+    @app.middleware("http")
+    async def revalidate_dashboard_files(request: Request, call_next):
+        """Make browsers re-check the dashboard's own files on every load, so an update
+        shows up after a normal refresh instead of the cached old version."""
+        response = await call_next(request)
+        path = request.url.path
+        if not path.startswith(("/api/", "/media/")) and "Cache-Control" not in response.headers:
+            response.headers["Cache-Control"] = "no-cache"
+        return response
+
     def auth(request: Request):
         if not request.session.get("ok"):
             raise HTTPException(401, "Sign in required")
@@ -122,7 +132,8 @@ def create_app(cfg: dict) -> FastAPI:
     def me(request: Request):
         return {"authed": bool(request.session.get("ok")), "store_name": cfg["store_name"],
                 "default_password": cfg["dashboard_password"] == "change-me",
-                "cameras": len(engine.workers)}  # only cameras that are switched on
+                "cameras": len(engine.workers),  # only cameras that are switched on
+                "team_mode": bool(cfg.get("team_mode", True))}
 
     @app.post("/api/login")
     async def login(body: LoginBody, request: Request):
@@ -142,6 +153,28 @@ def create_app(cfg: dict) -> FastAPI:
     def stats():
         today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
         return store.stats(today.timestamp(), (today - timedelta(days=6)).timestamp())
+
+    @app.get("/api/overview", dependencies=[Depends(auth)])
+    def overview():
+        """Everything the overview page needs in one call."""
+        today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        res = lab_results()
+        s = res.get("summary") or {}
+        vids = evaluation.list_videos(eval_dir) if eval_dir.exists() else []
+        labeled = sum(evaluation.load_labels(eval_dir, v.name)["done"] for v in vids)
+        zones = sum(len(engine.zones.get(cid)["shelf"]) for cid in engine.workers)
+        return {
+            "stats": store.stats(today.timestamp(), (today - timedelta(days=6)).timestamp()),
+            "daily": store.daily(14),
+            "cameras": {"total": len(engine.workers),
+                        "online": sum(w.camera.connected for w in engine.workers.values()),
+                        "ai_ready": sum(w.ai_ready for w in engine.workers.values())},
+            "devices": len(store.subs()),
+            "zones": zones,
+            "has_test_alert": store.has_test_alert(),
+            "accuracy": {"catch_rate": s.get("catch_rate"), "false_alarms_per_hour": s.get("false_alarms_per_hour"),
+                         "videos": len(vids), "labeled": labeled, "run_at": res.get("run_at")},
+        }
 
     @app.get("/api/events", dependencies=[Depends(auth)])
     def events(status: str | None = None, before: float | None = None, limit: int = 30):
@@ -356,6 +389,17 @@ def create_app(cfg: dict) -> FastAPI:
         return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
 
     # ---------- dashboard (PWA) ----------
+    @app.get("/", include_in_schema=False)
+    @app.get("/index.html", include_in_schema=False)
+    def index():
+        """The page, with each file's URL stamped by its last-modified time
+        (/app.js?v=…), so a browser can never keep running an old copy after an update."""
+        html = (WEB_DIR / "index.html").read_text(encoding="utf-8")
+        for name in ("app.js", "styles.css"):
+            v = int((WEB_DIR / name).stat().st_mtime)
+            html = html.replace(f'"/{name}"', f'"/{name}?v={v}"')
+        return Response(html, media_type="text/html", headers={"Cache-Control": "no-store"})
+
     @app.get("/sw.js")
     def sw():
         return FileResponse(WEB_DIR / "sw.js", media_type="application/javascript",

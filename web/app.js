@@ -8,6 +8,8 @@
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const app = $("#app");
+  // static demo build (deploy/build_static_demo.py): data comes from demo.js, not a server
+  const DEMO = !!window.OVERSYTE_DEMO;
 
   class AuthError extends Error {}
 
@@ -68,6 +70,7 @@
     play: `<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13a1 1 0 0 0 1.5.87l11-6.5a1 1 0 0 0 0-1.74l-11-6.5A1 1 0 0 0 8 5.5z"/></svg>`,
     chevron: svg(`<path d="m9 18 6-6-6-6"/>`),
     lock: svg(`<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>`),
+    store: svg(`<path d="M2 10l2-6h16l2 6z"/><path d="M4 10v10h16V10"/><path d="M10 20v-5h4v5"/>`),
     zone: svg(`<path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><rect x="7" y="7" width="10" height="10" rx="1"/>`),
   };
   const ICON = {
@@ -96,18 +99,20 @@
   }
 
   // ---------- shell ----------
-  const brandHTML = (sub = true) => `<div class="brand">${ICON.logo}<div>Oversyte${sub ? "<small>Loss prevention</small>" : ""}</div></div>`;
+  const brandHTML = () => `<div class="brand"><img src="/brand/oversyte-logo-sm.png" alt="Oversyte"></div>`;
   // Camera features only show when at least one camera is switched on in config.yaml.
   const hasCams = () => (state.cams ? state.cams.total : state.me.cameras || 0) > 0;
+  // team mode = Oversyte staff view (Accuracy lab, labeling details); off for store owners
+  const team = () => state.me.team_mode !== false;
   const liveChip = () => {
     if (!hasCams()) return `<span data-live-chip hidden></span>`;
     const { online = 0, total = 0 } = state.cams || {};
     const ok = total > 0 && online === total;
     const txt = !state.cams ? "Connecting…" : total === 0 ? "No cameras" : ok
-      ? `Live · ${total} camera${total === 1 ? "" : "s"}` : `${online} of ${total} cameras online`;
+      ? `${DEMO ? "Demo" : "Live"} · ${total} camera${total === 1 ? "" : "s"}` : `${online} of ${total} cameras online`;
     return `<span class="live-chip ${state.cams && !ok ? "off" : ""}" data-live-chip><span class="pulse"></span>${txt}</span>`;
   };
-  const sideStatus = () => !hasCams() ? "Cameras off · labeling mode"
+  const sideStatus = () => DEMO ? "Recorded demo" : !hasCams() ? (team() ? "Cameras off · labeling mode" : "Setting up · cameras not connected")
     : !state.cams ? "Protected by Oversyte" : `${state.cams.online}/${state.cams.total} cameras live`;
   const pageHead = (eyebrow, title, sub, right = "") => `
     <div class="page-head"><div>
@@ -122,11 +127,9 @@
       <aside class="sidebar">
         ${brandHTML()}
         <nav class="nav">
-          <div class="nav-label">Monitor</div>
-          ${link("alerts", "#/", ICON.bell, "Alerts", badge)}
+          ${link("alerts", "#/", ICON.bell, "Overview", badge)}
           ${hasCams() ? link("cameras", "#/cameras", ICON.cam, "Cameras") : ""}
-          <div class="nav-label">Improve</div>
-          ${link("lab", "#/lab", I.chart, "Accuracy")}
+          ${team() ? link("lab", "#/lab", I.chart, "Accuracy") : ""}
           ${link("settings", "#/settings", ICON.gear, "Settings")}
         </nav>
         <div class="side-foot"><div class="store-card"><span class="pulse"></span>
@@ -140,40 +143,46 @@
   // ---------- login ----------
   function renderLogin() {
     cleanupView();
+    const store = esc(state.me.store_name || "your store");
     app.innerHTML = `
       <div class="auth">
         <section class="auth-hero">
-          ${brandHTML()}
-          <div class="pitch">
-            <div class="eyebrow">AI loss prevention</div>
-            <h1>Stop theft<br><span class="grad-text">the moment it happens.</span></h1>
-            <p class="lead">Oversyte watches the cameras you already have and sends your team a video alert the second someone conceals an item.</p>
-            <div class="features">
-              <div><span class="ico-tile">${ICON.cam}</span>Works with your existing cameras. No new hardware.</div>
-              <div><span class="ico-tile violet">${I.zap}</span>AI watches every aisle, 24/7.</div>
-              <div><span class="ico-tile red">${I.phone}</span>Instant phone alerts with the video clip.</div>
-            </div>
-          </div>
-          <div class="mock-alert"><span class="ico-tile red">${I.alert}</span>
-            <div class="grow"><b>Possible theft: Aisle 3</b><small>Item concealed in jacket · just now</small></div>
-            <span class="pill new">New</span></div>
+          <div class="hero-alert">${I.alert}<div><b>Possible theft · Aisle 2</b><small>Alert sent to staff and owner · just now</small></div></div>
+          <p class="tag">See more. Lose less.</p>
+          <h1>Stop theft the moment it happens.</h1>
+          <p class="lead">AI that plugs into the cameras you already have, spots theft in real time, and instantly alerts your staff and you.</p>
+          <div class="for"><span>Convenience stores</span><span>Gas stations</span><span>Truck stops</span></div>
         </section>
         <section class="auth-form">
-          <form class="stack" id="login">
-            <div class="mobile-brand">${brandHTML()}</div>
-            <div><h2>Welcome back</h2>
-              <p class="muted" style="margin-top:6px">Sign in to ${esc(state.me.store_name || "your store")}'s dashboard.</p></div>
-            <label class="field" style="margin-top:22px"><span>Store password</span>
-              <input type="password" name="password" autocomplete="current-password" placeholder="••••••••" required autofocus></label>
-            <button class="btn primary block" type="submit" style="min-height:50px">Sign in ${I.chevron}</button>
-            <p class="small" id="login-err" style="color:var(--danger);min-height:20px"></p>
-            <div class="auth-foot">${I.lock}Video stays on your store's computer.</div>
+          <form class="auth-card" id="login">
+            <img class="logo" src="/brand/oversyte-logo-sm.png" alt="Oversyte">
+            <h2>Sign in</h2>
+            <p class="muted">Review alerts and video clips for your store.</p>
+            <div class="store-badge"><span class="ico-tile">${I.store}</span>
+              <div class="grow"><small>Store</small><b>${store}</b></div><span class="pulse" title="Monitoring"></span></div>
+            <label class="field"><span>Password</span>
+              <div class="input-wrap">${I.lock}
+                <input type="password" name="password" autocomplete="current-password" placeholder="Enter store password" required autofocus>
+                <button type="button" class="peek" aria-label="Show password" title="Show password">${I.eye}</button>
+              </div></label>
+            <button class="btn primary block signin" type="submit">Sign in ${I.chevron}</button>
+            <p class="small login-err" id="login-err" role="alert"></p>
+            <div class="secure">${I.check}<span>Encrypted session · Video never leaves your store</span></div>
           </form>
+          <p class="auth-legal">© ${new Date().getFullYear()} Oversyte · <a href="https://oversyteai.com" target="_blank" rel="noopener">oversyteai.com</a></p>
         </section>
       </div>`;
+    $(".peek").onclick = (e) => {
+      const input = $("#login input[name=password]");
+      const show = input.type === "password";
+      input.type = show ? "text" : "password";
+      e.currentTarget.setAttribute("aria-label", show ? "Hide password" : "Show password");
+      e.currentTarget.classList.toggle("on", show);
+      input.focus();
+    };
     $("#login").onsubmit = async (e) => {
       e.preventDefault();
-      const btn = $("button", e.target);
+      const btn = $("button[type=submit]", e.target);
       btn.disabled = true;
       try {
         await api("/api/login", { method: "POST", body: { password: e.target.password.value } });
@@ -194,80 +203,190 @@
   const statusPill = (ev) => ev.is_test ? `<span class="pill test">Test</span>`
     : `<span class="pill ${esc(ev.status)}">${esc(STATUS_LABEL[ev.status])}</span>`;
 
-  function eventCard(ev) {
-    const bg = ev.thumb_url ? `style="background-image:url('${esc(ev.thumb_url)}')"` : "";
-    return `<a class="event ${ev.status === "new" && !ev.is_test ? "new" : ""}" href="#/event/${ev.id}">
-      <div class="media" ${bg}>
-        <div class="tl">${statusPill(ev)}</div>
-        <div class="tr"><span class="pill glass">${ago(ev.ts)}</span></div>
-        ${ev.clip_url ? `<div class="play">${I.play}</div>` : ""}
-        <div class="bl">${ICON.cam}<span>${esc(ev.camera_name)}</span></div>
-      </div>
-      <div class="body">
-        <p class="reason">${esc(ev.reason)}</p>
-        ${meter(ev.score)}
-      </div></a>`;
-  }
 
   const greeting = () => {
     const h = new Date().getHours();
     return h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening";
   };
 
-  async function alertsView() {
-    const STATS = [
-      ["Alerts today", I.alert, ""], ["Needs review", I.eye, "red"],
-      ["Thefts confirmed · 7 days", I.check, "violet"], ["False alarms · 7 days", I.x, "green"],
+  // ----- overview pieces -----
+  const shortDay = (iso) => new Date(iso + "T12:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" });
+
+  function metricsHTML(st) {
+    const reviewed = st.theft_week + st.false_alarm_week;
+    const m = (value, label, hot = false) => `<div class="metric${hot ? " hot" : ""}" ${hot ? `data-f="new" role="button"` : ""}><b>${value}</b><span>${label}</span></div>`;
+    return m(st.today, "Alerts today")
+      + m(st.unreviewed, st.unreviewed ? `Needs review ${I.chevron}` : "Needs review", st.unreviewed > 0)
+      + m(st.theft_week, "Thefts (7 days)")
+      + m(reviewed ? `${Math.round((st.false_alarm_week / reviewed) * 100)}%` : "–", "False alarm rate");
+  }
+
+  /** 14-day alert bars: one series, recessive grid, per-bar hover tooltip. */
+  function activityChart(daily) {
+    const W = 420, H = 190, L = 22, R = 4, T = 10, B = 26;
+    const max = Math.max(...daily.map((d) => d.alerts));
+    const top = max <= 4 ? 4 : Math.ceil(max / 4) * 4;
+    const slot = (W - L - R) / daily.length, bw = Math.min(14, slot * 0.55);
+    const y = (v) => T + (H - T - B) * (1 - v / top);
+    const today = daily.at(-1).date;
+    let s = `<svg viewBox="0 0 ${W} ${H}" class="chart-svg" role="img" aria-label="Alerts per day, last 14 days">`;
+    [0, top].forEach((t) => {
+      s += `<line x1="${L}" x2="${W - R}" y1="${y(t)}" y2="${y(t)}" class="grid${t === 0 ? " base" : ""}"/>`
+        + `<text x="${L - 6}" y="${y(t) + 4}" text-anchor="end" class="tick">${t}</text>`;
+    });
+    daily.forEach((d, i) => {
+      const cx = L + slot * i + slot / 2, x = cx - bw / 2, y0 = y(0);
+      if (d.alerts > 0) {
+        const yt = y(d.alerts), r = Math.min(3, (y0 - yt) / 2);
+        s += `<path class="bar" d="M${x} ${y0}V${yt + r}Q${x} ${yt} ${x + r} ${yt}H${x + bw - r}Q${x + bw} ${yt} ${x + bw} ${yt + r}V${y0}Z"/>`;
+      }
+      if (i === 0 || i === daily.length - 1 || i === Math.floor(daily.length / 2)) {
+        s += `<text x="${cx}" y="${H - 6}" text-anchor="middle" class="tick">${d.date === today ? "Today" : shortDay(d.date)}</text>`;
+      }
+      s += `<rect class="hit" data-i="${i}" x="${L + slot * i}" y="${T}" width="${slot}" height="${H - T - B}"/>`;
+    });
+    return s + "</svg>";
+  }
+
+  /** Setup steps, in order. ok = done; act = link, "test", or null (done by the installer). */
+  function setupSteps(o) {
+    const s = [
+      { ok: o.cameras.total > 0, title: "Connect cameras", act: null },
+      { ok: o.zones > 0, title: "Mark shelves", act: o.cameras.total ? "#/cameras" : null, btn: "Mark shelves" },
+      { ok: o.devices > 0, title: "Phone alerts", act: "#/settings", btn: "Set up phone alerts" },
+      { ok: o.has_test_alert, title: "Test alert", act: "test", btn: "Send a test alert" },
     ];
+    if (team()) s.push({ ok: o.accuracy.catch_rate != null, title: "Measure accuracy", act: "#/lab", btn: "Open Accuracy lab" });
+    return s;
+  }
+
+  /** One slim line that says whether the store is protected, or what to do next. */
+  function statusStrip(o) {
+    const c = o.cameras, plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
+    if (c.total && c.online === c.total) {
+      return `<div class="strip"><span class="sdot ok"></span><b>Protected</b>
+        <span class="muted">Watching ${plural(c.total, "camera")} · ${o.devices ? `${plural(o.devices, "phone")} get alerts` : "no phones set up yet"}</span>
+        <span class="grow"></span><a class="strip-link" href="#/cameras">View cameras ${I.chevron}</a></div>`;
+    }
+    if (c.total) {
+      return `<div class="strip warn"><span class="sdot warn"></span><b>${plural(c.total - c.online, "camera")} offline</b>
+        <span class="muted">Oversyte can't watch those areas until they reconnect</span>
+        <span class="grow"></span><a class="strip-link" href="#/cameras">Check cameras ${I.chevron}</a></div>`;
+    }
+    const steps = setupSteps(o), done = steps.filter((s) => s.ok).length;
+    const next = steps.find((s) => !s.ok && s.act);
+    const btn = !next ? "" : next.act === "test"
+      ? `<button class="btn small primary" type="button" data-test>${next.btn}</button>`
+      : `<a class="btn small primary" href="${next.act}">${next.btn}</a>`;
+    return `<div class="strip setup">
+      <div class="strip-row"><span class="sdot"></span><b>Finish setup</b><span class="muted">${done} of ${steps.length} done</span><span class="grow"></span>${btn}</div>
+      <div class="strip-bar"><i style="width:${(done / steps.length) * 100}%"></i></div>
+      <div class="strip-steps">${steps.map((s) => `<span class="${s.ok ? "done" : ""}">${s.ok ? I.check : "<i></i>"}${s.title}</span>`).join("")}</div>
+    </div>`;
+  }
+
+  function alertRow(ev) {
+    const img = ev.thumb_url ? `style="background-image:url('${esc(ev.thumb_url)}')"` : "";
+    return `<a class="arow" href="#/event/${ev.id}">
+      <span class="athumb ${ev.thumb_url ? "" : "noimg"}" ${img}>${ev.thumb_url ? "" : ICON.cam}</span>
+      <span class="grow"><span class="arow-top"><b>${esc(ev.camera_name)}</b>${statusPill(ev)}</span>
+        <span class="arow-reason">${esc(ev.reason)}</span></span>
+      <span class="arow-meta"><span>${ago(ev.ts)}</span><small>${Math.round(ev.score * 100)}%</small></span>
+    </a>`;
+  }
+
+  async function alertsView() {
+    const now = new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
     const view = shell("alerts", `
-      ${pageHead(`${greeting()}`, "Store overview",
-        `Real-time theft detection for ${esc(state.me.store_name)}.`, `<div class="row">${liveChip()}</div>`)}
+      <div class="ov-head">
+        <div><p class="ov-date">${greeting()} · ${now}</p><h1>Overview</h1></div>
+        <button class="btn small" type="button" data-test aria-label="Send test alert">${I.send}<span class="lbl">Send test alert</span></button>
+      </div>
       ${state.me.default_password ? `<div class="banner warn">${I.lock}<div>The dashboard password is still the default. Change <b>dashboard_password</b> in config.yaml.</div></div>` : ""}
-      <div class="stats" id="stats">${STATS.map(([l, icon, tone]) =>
-        `<div class="stat"><span class="ico-tile ${tone}">${icon}</span><b>–</b><span>${l}</span></div>`).join("")}</div>
-      <div class="section-head"><h2>Recent alerts</h2>
-        <div class="chips" id="chips">
-          ${[["", "All"], ["new", "Needs review"], ["theft", "Theft"], ["false_alarm", "False alarm"]]
-            .map(([v, l]) => `<button class="chip ${state.filter === v ? "active" : ""}" data-f="${v}">${l}</button>`).join("")}
-        </div></div>
-      <div class="events" id="events"><div class="empty"><div class="spinner"></div></div></div>
-      <div style="text-align:center;margin-top:22px"><button class="btn small" id="more" hidden>Load older alerts</button></div>`);
+      <div id="strip"></div>
+      <div class="metrics" id="metrics">${metricsHTML({ today: "–", unreviewed: 0, theft_week: "–", false_alarm_week: 0 })}</div>
+      <div class="ov2">
+        <section class="panel">
+          <div class="panel-head"><h2>Recent alerts</h2>
+            <div class="tabs" id="chips">${[["", "All"], ["new", "To review"], ["theft", "Theft"], ["false_alarm", "False alarm"]]
+              .map(([v, l]) => `<button class="chip ${state.filter === v ? "active" : ""}" data-f="${v}">${l}</button>`).join("")}</div>
+          </div>
+          <div class="alist" id="events"><div class="spinner"></div></div>
+          <button class="more" id="more" hidden>Show older</button>
+        </section>
+        <section class="panel">
+          <div class="panel-head"><h2>Activity</h2><span class="muted small"><b id="total14">–</b> alerts · 14 days</span></div>
+          <div class="chart-wrap" id="chart"><div class="spinner"></div></div>
+        </section>
+      </div>`);
 
     let oldest = null;
     const list = $("#events", view);
+    let daily = [];
+
+    const tip = document.createElement("div");
+    tip.className = "chart-tip";
+    tip.hidden = true;
+    $("#chart", view).appendChild(tip);
+    $("#chart", view).addEventListener("mousemove", (e) => {
+      const hit = e.target.closest(".hit");
+      $$(".bar.on", view).forEach((b) => b.classList.remove("on"));
+      if (!hit) { tip.hidden = true; return; }
+      const d = daily[+hit.dataset.i];
+      $$(".bar", view)[daily.slice(0, +hit.dataset.i).filter((x) => x.alerts > 0).length]?.classList.toggle("on", d.alerts > 0);
+      tip.innerHTML = `<b>${d.date === daily.at(-1).date ? "Today" : shortDay(d.date)}</b>
+        <div><span>Alerts</span><b>${d.alerts}</b></div><div><span>Theft</span><b>${d.theft}</b></div>
+        <div><span>False alarm</span><b>${d.false_alarm}</b></div><div><span>To review</span><b>${d.open}</b></div>`;
+      const box = $("#chart", view).getBoundingClientRect(), hb = hit.getBoundingClientRect();
+      tip.hidden = false;
+      tip.style.left = `${Math.min(Math.max(hb.left - box.left + hb.width / 2 - tip.offsetWidth / 2, 0), box.width - tip.offsetWidth)}px`;
+      tip.style.top = `${Math.max(hb.top - box.top - 8, 0)}px`;
+    });
+    $("#chart", view).addEventListener("mouseleave", () => { tip.hidden = true; $$(".bar.on", view).forEach((b) => b.classList.remove("on")); });
+
+    const loadOverview = async () => {
+      const o = await api("/api/overview");
+      daily = o.daily;
+      $("#metrics", view).innerHTML = metricsHTML(o.stats);
+      $("#strip", view).innerHTML = statusStrip(o);
+      const total = daily.reduce((n, d) => n + d.alerts, 0);
+      $("#total14", view).textContent = total;
+      $$("#chart > :not(.chart-tip)", view).forEach((n) => n.remove());
+      $("#chart", view).insertAdjacentHTML("afterbegin", activityChart(daily)
+        + (total ? "" : `<div class="chart-empty">No alerts in the last 14 days</div>`));
+      $("#chart", view).classList.toggle("is-empty", !total);
+    };
 
     const load = async (append = false) => {
-      const q = new URLSearchParams({ limit: 30 });
+      const q = new URLSearchParams({ limit: 20 });
       if (state.filter) q.set("status", state.filter);
       if (append && oldest) q.set("before", oldest);
-      const [events, stats] = await Promise.all([api("/api/events?" + q), append ? null : api("/api/stats")]);
-      if (stats) {
-        const vals = [stats.today, stats.unreviewed, stats.theft_week, stats.false_alarm_week];
-        $$("#stats .stat", view).forEach((el, i) => {
-          $(":scope > b", el).textContent = vals[i];
-          el.classList.toggle("hot", i === 1 && vals[i] > 0);
-        });
-      }
+      const events = await api("/api/events?" + q);
+      if (!append) loadOverview().catch(() => {});
       if (!append && !events.length) {
-        list.innerHTML = `<div class="empty"><div class="orb">${ICON.shield}</div>
-          <b>${state.filter ? "Nothing here" : "All clear"}</b>
-          <div class="small">${state.filter ? "No alerts match this filter." : "No alerts yet. When someone conceals an item, it appears here and on your team's phones within seconds."}</div></div>`;
+        list.innerHTML = `<div class="alist-empty">${ICON.shield}<b>${state.filter ? "Nothing here" : "No alerts yet"}</b>
+          <span>${state.filter ? "No alerts match this filter." : "When someone conceals an item, it shows up here and on your team's phones."}</span></div>`;
       } else {
-        const html = events.map(eventCard).join("");
+        const html = events.map(alertRow).join("");
         if (append) list.insertAdjacentHTML("beforeend", html); else list.innerHTML = html;
       }
       if (events.length) oldest = events[events.length - 1].ts;
-      $("#more", view).hidden = events.length < 30;
+      $("#more", view).hidden = events.length < 20;
     };
 
-    $("#chips", view).onclick = (e) => {
-      const b = e.target.closest(".chip");
-      if (!b) return;
-      state.filter = b.dataset.f;
-      $$(".chip", view).forEach((c) => c.classList.toggle("active", c === b));
+    const setFilter = (f) => {
+      state.filter = f;
+      $$(".chip", view).forEach((c) => c.classList.toggle("active", c.dataset.f === f));
       oldest = null;
       load().catch(handleErr);
     };
+    $("#chips", view).onclick = (e) => { const b = e.target.closest(".chip"); if (b) setFilter(b.dataset.f); };
+    view.addEventListener("click", (e) => {
+      const t = e.target.closest("[data-test]");
+      if (t) { sendTest(null, t).then(() => setTimeout(() => load().catch(() => {}), 500)); return; }
+      const m = e.target.closest(".metric[data-f]");
+      if (m) setFilter(m.dataset.f);
+    });
     $("#more", view).onclick = () => load(true).catch(handleErr);
     await load();
     const t = setInterval(() => load().catch(() => {}), 8000);
@@ -353,7 +472,8 @@
   // ---------- cameras ----------
   async function camerasView() {
     const view = shell("cameras", pageHead("Monitor", "Cameras",
-      "Live feeds with AI overlay. Open a camera to draw shelf zones.", `<div class="row">${liveChip()}</div>`)
+      DEMO ? "Recorded store footage with Oversyte's AI overlay, on a loop." : "Live feeds with AI overlay. Open a camera to draw shelf zones.",
+      `<div class="row">${liveChip()}</div>`)
       + `<div class="cams" id="cams"></div>`);
     const cams = await api("/api/cameras");
     const grid = $("#cams", view);
@@ -365,8 +485,8 @@
     grid.innerHTML = cams.map((c) => `
       <a class="cam" href="#/camera/${encodeURIComponent(c.id)}">
         <div class="view">
-          ${c.connected ? `<img data-live src="/api/cameras/${encodeURIComponent(c.id)}/live" alt="">` : `<span>${esc(c.error || "Connecting…")}</span>`}
-          <span class="live-badge ${c.connected ? "" : "offline"}"><span class="pulse"></span>${c.connected ? "LIVE" : "OFFLINE"}</span>
+          ${c.video_url ? feedVideo(c) : c.connected ? `<img data-live src="/api/cameras/${encodeURIComponent(c.id)}/live" alt="">` : `<span>${esc(c.error || "Connecting…")}</span>`}
+          <span class="live-badge ${c.connected ? "" : "offline"}"><span class="pulse"></span>${DEMO ? "DEMO FEED" : c.connected ? "LIVE" : "OFFLINE"}</span>
           ${c.connected && c.ai_ready ? `<span class="tr"><span class="pill glass">${c.people} ${c.people === 1 ? "person" : "people"}</span></span>` : ""}
           <div class="overlay-meta"><div class="grow"><b>${esc(c.name)}</b><small>${camLine(c)}</small></div>${I.chevron}</div>
         </div>
@@ -374,11 +494,14 @@
   }
 
   function camLine(c) {
+    if (DEMO) return "Recorded demo footage · AI overlay";
     if (!c.connected) return esc(c.error || "Offline");
     if (c.error) return esc(c.error);
     if (!c.ai_ready) return "Loading AI…";
     return `AI active · ${c.analysis_ms} ms per frame`;
   }
+  // static demo: a recorded camera loop with the AI's boxes drawn in, instead of a live stream
+  const feedVideo = (c, id = "") => `<video ${id ? `id="${id}"` : ""} src="${esc(c.video_url)}" autoplay muted loop playsinline></video>`;
 
   async function cameraView(id) {
     const enc = encodeURIComponent(id);
@@ -387,11 +510,11 @@
     if (!cam) { location.hash = "#/cameras"; return; }
     const view = shell("cameras", `
       <a class="back" href="#/cameras">${ICON.back}All cameras</a>
-      ${pageHead("Live camera", esc(cam.name), `<span id="camline">${camLine(cam)}</span>`,
-        `<button class="btn" id="edit">${I.zone}Edit zones</button>`)}
+      ${pageHead(DEMO ? "Camera" : "Live camera", esc(cam.name), `<span id="camline">${camLine(cam)}</span>`,
+        DEMO ? "" : `<button class="btn" id="edit">${I.zone}Edit zones</button>`)}
       <div class="stack">
-        <div class="live-wrap" id="wrap"><img data-live id="live" src="/api/cameras/${enc}/live" alt="">
-          <span class="live-badge ${cam.connected ? "" : "offline"}"><span class="pulse"></span>${cam.connected ? "LIVE" : "OFFLINE"}</span></div>
+        <div class="live-wrap" id="wrap">${cam.video_url ? feedVideo(cam, "live") : `<img data-live id="live" src="/api/cameras/${enc}/live" alt="">`}
+          <span class="live-badge ${cam.connected ? "" : "offline"}"><span class="pulse"></span>${DEMO ? "DEMO FEED" : cam.connected ? "LIVE" : "OFFLINE"}</span></div>
         <div id="panel"></div>
       </div>`);
 
@@ -423,7 +546,7 @@
     }, 3000);
     state.cleanup.push(() => clearInterval(t));
 
-    $("#edit", view).onclick = () => zoneEditor(id, view, () => { panel.innerHTML = legendHTML; bindTest(); });
+    $("#edit", view)?.addEventListener("click", () => zoneEditor(id, view, () => { panel.innerHTML = legendHTML; bindTest(); }));
   }
 
   async function zoneEditor(id, view, onDone) {
@@ -1061,7 +1184,9 @@
     try { savedName = localStorage.getItem("oversyte-device") || ""; } catch (_) {}
 
     let pushBlock;
-    if (!window.isSecureContext) {
+    if (DEMO) {
+      pushBlock = `<div class="banner info" style="margin:0">${I.phone}<div>In the installed product, owner and staff phones get every alert instantly, with the video clip. This online demo shows recorded footage, so phone alerts are switched off here.</div></div>`;
+    } else if (!window.isSecureContext) {
       pushBlock = `<div class="banner warn" style="margin:0">Phone alerts need a secure (https://) address. Open the dashboard through your HTTPS link (see README → "Phone alerts"), or use http://localhost on this computer.</div>`;
     } else if (isIOS && !isStandalone) {
       pushBlock = `<div class="banner info" style="margin:0"><b>On iPhone:</b> tap the Share button, choose <b>Add to Home Screen</b>, then open Oversyte from your home screen and come back here to turn on alerts.</div>`;
@@ -1095,7 +1220,7 @@
         <div class="card stack">
           <div class="card-head"><span class="ico-tile green">${I.download}</span><div class="grow"><h2>Reviewed clips</h2>
             <p>Every clip marked theft or false alarm, with labels. Useful for police reports.</p></div></div>
-          <a class="btn" href="/api/export.zip">${I.download}Download labeled clips (.zip)</a>
+          ${DEMO ? `<p class="small muted">Available in the installed product.</p>` : `<a class="btn" href="/api/export.zip">${I.download}Download labeled clips (.zip)</a>`}
         </div>
         <div class="card stack">
           <div class="card-head"><span class="ico-tile violet">${I.lock}</span><div class="grow"><h2>Account</h2>
@@ -1175,6 +1300,7 @@
       else if (page === "cameras") await camerasView();
       else if (page === "camera") await cameraView(decodeURIComponent(arg));
       else if (page === "settings") await settingsView();
+      else if (page === "lab" && !team()) location.hash = "#/";
       else if (page === "lab") await (arg ? labelView(decodeURIComponent(arg)) : labView());
       else location.hash = "#/";
     } catch (e) { handleErr(e); }
@@ -1182,7 +1308,7 @@
 
   window.addEventListener("hashchange", route);
 
-  if ("serviceWorker" in navigator) {
+  if ("serviceWorker" in navigator && !DEMO) {
     navigator.serviceWorker.register("/sw.js").catch((e) => console.warn("SW failed", e));
     navigator.serviceWorker.addEventListener("message", (e) => {
       if (e.data?.type === "open" && e.data.url) location.href = e.data.url;

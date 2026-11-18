@@ -9,6 +9,7 @@ import yaml
 DEFAULTS = {
     "store_name": "My Store",
     "dashboard_password": "change-me",
+    "team_mode": True,
     "public_url": "http://localhost:8000",
     "push_contact": "mailto:admin@example.com",
     "data_dir": "data",

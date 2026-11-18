@@ -108,6 +108,11 @@ class Camera(threading.Thread):
         next_t = time.time()
         while not self._stop.is_set():
             ok, frame = cap.read()
+            if (not ok or frame is None) and is_file and self.loop:
+                # looping demo/test video: rewind in place, so the camera never shows as offline
+                cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                ok, frame = cap.read()
+                next_t = time.time()
             if not ok or frame is None:
                 fails += 1
                 if is_file or fails > 30:

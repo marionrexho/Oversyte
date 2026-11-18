@@ -1,0 +1,11 @@
+.venv/
+.git/
+__pycache__/
+.pytest_cache/
+data/
+eval/
+demo/
+cloud-demo/
+models/
+config.yaml
+*.pt

@@ -216,9 +216,9 @@ def _convert(src: Path, out: Path):
 
 
 # ---------- step 1: run the AI over a video (slow, cached) ----------
-def _cache_key(path: Path, det_cfg: dict, clip_cfg: dict) -> str:
+def _cache_key(path: Path, det_cfg: dict, clip_cfg: dict, name: str | None = None) -> str:
     st = path.stat()
-    parts = [CACHE_VERSION, path.name, st.st_size, int(st.st_mtime),
+    parts = [CACHE_VERSION, name or path.name, st.st_size, int(st.st_mtime),
              Path(det_cfg["pose_model"]).name, Path(det_cfg.get("object_model") or "-").name,
              det_cfg["analysis_fps"], det_cfg["imgsz"], det_cfg["person_conf"],
              det_cfg["object_conf"], clip_cfg["max_width"]]

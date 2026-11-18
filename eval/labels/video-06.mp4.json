@@ -1,0 +1,23 @@
+{
+ "events": [
+  {
+   "t": 7.77,
+   "type": "pocket"
+  }
+ ],
+ "scenes": [
+  {
+   "start": 0.0,
+   "shelf": [],
+   "ignore": []
+  },
+  {
+   "start": 20.82,
+   "shelf": [],
+   "ignore": []
+  }
+ ],
+ "done": true,
+ "notes": "he walked out by the 30 sec mark.",
+ "labeled_by": ""
+}

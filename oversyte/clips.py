@@ -43,7 +43,7 @@ def _stamp(frame: np.ndarray, text: str):
 
 def write_clip(frames: list[tuple[float, bytes]], out_mp4: Path, out_thumb: Path, fps: float,
                event_ts: float, track_id: int | None,
-               annotations: list[tuple[float, dict]], camera_name: str) -> bool:
+               annotations: list[tuple[float, dict]], camera_name: str, stamp_time: bool = True) -> bool:
     """frames: [(ts, jpeg)], annotations: [(ts, {track_id: box})] sorted by ts."""
     if not frames:
         return False
@@ -69,7 +69,7 @@ def write_clip(frames: list[tuple[float, bytes]], out_mp4: Path, out_thumb: Path
             ann = _nearest(annotations, ts) if track_id is not None else None
             if ann and track_id in ann[1]:
                 _draw(frame, ann[1][track_id], "Possible concealment" if ts >= event_ts else "Suspect")
-            _stamp(frame, f"{camera_name}  {_t.strftime('%Y-%m-%d %H:%M:%S', _t.localtime(ts))}")
+            _stamp(frame, f"{camera_name}  {_t.strftime('%Y-%m-%d %H:%M:%S', _t.localtime(ts))}" if stamp_time else camera_name)
             gap = abs(ts - event_ts)
             if gap < thumb_gap:
                 thumb, thumb_gap = frame.copy(), gap

@@ -5,6 +5,11 @@ store_name: "My Store"
 # Everyone (owner + staff) signs in to the dashboard with this password.
 dashboard_password: "change-me"
 
+# true  = Oversyte team view: shows the Accuracy lab and setup/labeling details.
+# false = store owner view: just protection status, alerts and settings.
+#         Set this to false on computers installed at a store.
+team_mode: true
+
 # The address phones use to reach the dashboard. Web push on phones needs HTTPS,
 # e.g. a Cloudflare Tunnel or Tailscale Funnel URL (see README).
 public_url: "http://localhost:8000"

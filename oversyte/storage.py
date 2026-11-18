@@ -104,6 +104,27 @@ class Store:
         return {"today": today, "week": week, "unreviewed": unreviewed,
                 "theft_week": theft, "false_alarm_week": fa}
 
+    def daily(self, days: int = 14) -> list[dict]:
+        """Real (non-test) alerts per local day for the last `days` days, oldest first."""
+        import datetime as dt
+        today = dt.date.today()
+        start = dt.datetime.combine(today - dt.timedelta(days=days - 1), dt.time()).timestamp()
+        rows = self._all(
+            "SELECT date(ts, 'unixepoch', 'localtime') AS d, COUNT(*) AS alerts, "
+            "SUM(status = 'theft') AS theft, SUM(status = 'false_alarm') AS false_alarm, "
+            "SUM(status = 'new') AS open FROM events WHERE is_test = 0 AND ts >= ? GROUP BY d", (start,))
+        by_day = {r["d"]: r for r in rows}
+        out = []
+        for i in range(days):
+            d = (today - dt.timedelta(days=days - 1 - i)).isoformat()
+            r = by_day.get(d, {})
+            out.append({"date": d, "alerts": r.get("alerts", 0) or 0, "theft": r.get("theft", 0) or 0,
+                        "false_alarm": r.get("false_alarm", 0) or 0, "open": r.get("open", 0) or 0})
+        return out
+
+    def has_test_alert(self) -> bool:
+        return bool(self._all("SELECT 1 FROM events WHERE is_test = 1 LIMIT 1"))
+
     # ---- push subscriptions ----
     def add_sub(self, sub: dict, label: str):
         self._exec("INSERT OR REPLACE INTO push_subs (endpoint, data, label, created) VALUES (?, ?, ?, ?)",

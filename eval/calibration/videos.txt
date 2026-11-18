@@ -1,5 +1,5 @@
 # Calibration videos: everyone labels these on their own, then runs
 #   python tools/compare_labels.py --save YOURNAME
-9aead55c-7d3c-4480-89e9-3e6d357af4c6.mp4
-cf492ba1-0f23-4afb-9bf6-1a430de6d26c.mp4
-fe448cdd-1eaf-4591-92aa-bcf057063529.mp4
+video-08.mp4
+video-11.mp4
+video-14.mp4
