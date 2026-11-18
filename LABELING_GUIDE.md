@@ -23,7 +23,10 @@ pip install -r requirements.txt
 
 1. Copy `config.example.yaml` to `config.yaml` and set your own `dashboard_password`.
   Leave the camera at `enabled: false`; labeling doesn't need a live camera.
-2. Download the test videos from the team AWS bucket into `eval/videos/`. They're already
+2. Download the test videos from the team AWS bucket (`oversyte-training-videos`, us-east-2)
+  into `eval/videos/`. Install the [AWS CLI](https://aws.amazon.com/cli/), sign in with
+  `aws configure` (ask the project owner for an AWS user), then run
+  `python tools/fetch_videos.py`. Run it again any time new videos are added. They're already
   named `video-01.mp4`, `video-02.mp4`, …, so everyone can say "video 7" and mean the same clip.
   **Don't rename them yourself.** Labels are matched to videos by file name.
   If you still have videos with the old long names, push your labels, pull, then run

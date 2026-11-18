@@ -12,7 +12,7 @@ demo/eval/
 cloud-demo/
 
 # Accuracy lab: share labels and calibration labels only.
-# Videos show real customers and are large: share them through the team Google Drive.
+# Videos are large: they live in S3 (python tools/fetch_videos.py), not git.
 eval/*
 !eval/labels/
 !eval/calibration/
