@@ -1,7 +1,13 @@
 {
  "events": [],
- "shelf": [],
- "ignore": [],
+ "scenes": [
+  {
+   "start": 0.0,
+   "shelf": [],
+   "ignore": []
+  }
+ ],
  "done": true,
- "notes": "nothing seen to be stolen"
+ "notes": "nothing seen to be stolen",
+ "labeled_by": "marion"
 }
