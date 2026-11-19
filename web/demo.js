@@ -61,7 +61,7 @@
 
   async function route(url, method, body) {
     const p = url.pathname, q = url.searchParams;
-    if (p === "/api/me") return json({ authed: authed(), store_name: data.store_name, default_password: false,
+    if (p === "/api/me") return json({ authed: authed(), store_name: data.store_name,
       cameras: data.cameras.length, team_mode: false, demo: true });
     if (p === "/api/login" && method === "POST") {
       if ((await sha256(body?.password || "")) !== data.password_sha256) return fail(401, "Wrong password");

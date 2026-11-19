@@ -33,8 +33,6 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     logging.getLogger("asyncio").addFilter(_HideBrowserHangups())
     cfg = load_config(cfg_path)
-    if cfg["dashboard_password"] == "change-me":
-        logging.warning("Dashboard password is still 'change-me'. Set dashboard_password in %s", cfg_path)
     app = create_app(cfg)
     print(f"\n  Oversyte dashboard: http://localhost:{cfg['server']['port']}\n")
     uvicorn.run(app, host=cfg["server"]["host"], port=int(cfg["server"]["port"]), log_level="warning")

@@ -1,4 +1,4 @@
-"""SQLite storage for incidents and push subscriptions."""
+"""SQLite storage for incidents, users, and push subscriptions."""
 from __future__ import annotations
 
 import json
@@ -26,6 +26,13 @@ CREATE TABLE IF NOT EXISTS events (
     is_test INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS events_ts ON events(ts DESC);
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    email TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    created REAL NOT NULL
+);
 CREATE TABLE IF NOT EXISTS push_subs (
     endpoint TEXT PRIMARY KEY,
     data TEXT NOT NULL,
@@ -124,6 +131,30 @@ class Store:
 
     def has_test_alert(self) -> bool:
         return bool(self._all("SELECT 1 FROM events WHERE is_test = 1 LIMIT 1"))
+
+    # ---- users ----
+    def add_user(self, name: str, email: str, password_hash: str) -> dict:
+        cur = self._exec(
+            "INSERT INTO users (name, email, password_hash, created) VALUES (?, ?, ?, ?)",
+            (name, email, password_hash, time.time()),
+        )
+        if cur.lastrowid is None:
+            raise RuntimeError("failed to create user")
+        user = self.get_user(int(cur.lastrowid))
+        if user is None:
+            raise RuntimeError("failed to load created user")
+        return user
+
+    def get_user(self, user_id: int) -> dict | None:
+        rows = self._all("SELECT * FROM users WHERE id = ?", (user_id,))
+        return rows[0] if rows else None
+
+    def get_user_by_email(self, email: str) -> dict | None:
+        rows = self._all("SELECT * FROM users WHERE email = ?", (email,))
+        return rows[0] if rows else None
+
+    def has_users(self) -> bool:
+        return bool(self._all("SELECT 1 FROM users LIMIT 1"))
 
     # ---- push subscriptions ----
     def add_sub(self, sub: dict, label: str):
