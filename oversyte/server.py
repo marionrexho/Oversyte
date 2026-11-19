@@ -18,7 +18,7 @@ from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.middleware.sessions import SessionMiddleware
@@ -50,7 +50,42 @@ def _safe_name(name: str) -> str:
     return name
 
 
+def _norm_email(email: str) -> str:
+    return email.strip().lower()
+
+
+def _hash_password(password: str) -> str:
+    salt = secrets.token_bytes(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, 120_000)
+    return f"pbkdf2_sha256${salt.hex()}${digest.hex()}"
+
+
+def _verify_password(password: str, stored: str) -> bool:
+    try:
+        algo, salt_hex, hash_hex = stored.split("$", 2)
+    except ValueError:
+        return False
+    if algo != "pbkdf2_sha256":
+        return False
+    salt = bytes.fromhex(salt_hex)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, 120_000)
+    return hmac.compare_digest(digest.hex(), hash_hex)
+
+
+def _public_user(user: dict | None) -> dict | None:
+    if not user:
+        return None
+    return {"id": user["id"], "name": user["name"], "email": user["email"]}
+
+
 class LoginBody(BaseModel):
+    email: str
+    password: str
+
+
+class SignupBody(BaseModel):
+    name: str
+    email: str
     password: str
 
 
@@ -130,18 +165,61 @@ def create_app(cfg: dict) -> FastAPI:
     # ---------- session ----------
     @app.get("/api/me")
     def me(request: Request):
+        user = None
+        if request.session.get("user_id"):
+            user = store.get_user(int(request.session["user_id"]))
+        elif request.session.get("legacy_ok"):
+            user = {"id": 0, "name": request.session.get("user_name", "Dashboard owner"),
+                    "email": request.session.get("user_email", "")}
         return {"authed": bool(request.session.get("ok")), "store_name": cfg["store_name"],
-                "default_password": cfg["dashboard_password"] == "change-me",
                 "cameras": len(engine.workers),  # only cameras that are switched on
-                "team_mode": bool(cfg.get("team_mode", True))}
+                "team_mode": bool(cfg.get("team_mode", True)),
+                "user": _public_user(user)}
+
+    @app.post("/api/signup")
+    async def signup(body: SignupBody, request: Request):
+        name = body.name.strip()
+        email = _norm_email(body.email)
+        password = body.password
+        if len(name) < 2:
+            raise HTTPException(400, "Enter your name")
+        if "@" not in email or len(email) < 5:
+            raise HTTPException(400, "Enter a valid email")
+        if len(password) < 4:
+            raise HTTPException(400, "Pick a stronger password")
+        if store.get_user_by_email(email):
+            raise HTTPException(409, "An account already exists for that email")
+        user = store.add_user(name, email, _hash_password(password))
+        request.session.clear()
+        request.session["ok"] = True
+        request.session["user_id"] = user["id"]
+        request.session["user_name"] = user["name"]
+        request.session["user_email"] = user["email"]
+        return {"ok": True, "user": _public_user(user)}
 
     @app.post("/api/login")
     async def login(body: LoginBody, request: Request):
-        if not hmac.compare_digest(body.password.encode(), str(cfg["dashboard_password"]).encode()):
-            await asyncio.sleep(1.0)
-            raise HTTPException(401, "Wrong password")
-        request.session["ok"] = True
-        return {"ok": True}
+        email = _norm_email(body.email) if body.email else ""
+        password = body.password
+        user = store.get_user_by_email(email) if email else None
+        if user:
+            if not _verify_password(password, user["password_hash"]):
+                raise HTTPException(401, "Wrong email or password")
+            request.session.clear()
+            request.session["ok"] = True
+            request.session["user_id"] = user["id"]
+            request.session["user_name"] = user["name"]
+            request.session["user_email"] = user["email"]
+            return {"ok": True, "user": _public_user(user)}
+        if hmac.compare_digest(password.encode(), str(cfg["dashboard_password"]).encode()):
+            request.session.clear()
+            request.session["ok"] = True
+            request.session["legacy_ok"] = True
+            request.session["user_name"] = cfg["store_name"]
+            request.session["user_email"] = ""
+            return {"ok": True, "legacy": True}
+        await asyncio.sleep(1.0)
+        raise HTTPException(401, "Wrong email or password")
 
     @app.post("/api/logout")
     def logout(request: Request):
@@ -388,12 +466,36 @@ def create_app(cfg: dict) -> FastAPI:
     async def http_error(request: Request, exc: HTTPException):
         return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
 
+    def _auth_page(name: str) -> Response:
+        html = (WEB_DIR / "auth" / f"{name}.html").read_text(encoding="utf-8")
+        for asset in ("styles.css", "auth/auth.js"):
+            v = int((WEB_DIR / asset).stat().st_mtime)
+            html = html.replace(f'"/{asset}"', f'"/{asset}?v={v}"')
+        return Response(html, media_type="text/html", headers={"Cache-Control": "no-store"})
+
+    # ---------- auth pages ----------
+    @app.get("/auth", include_in_schema=False)
+    @app.get("/auth/", include_in_schema=False)
+    @app.get("/auth/login", include_in_schema=False)
+    def auth_login(request: Request):
+        if request.session.get("ok"):
+            return RedirectResponse("/", status_code=303)
+        return _auth_page("login")
+
+    @app.get("/auth/signup", include_in_schema=False)
+    def auth_signup(request: Request):
+        if request.session.get("ok"):
+            return RedirectResponse("/", status_code=303)
+        return _auth_page("signup")
+
     # ---------- dashboard (PWA) ----------
     @app.get("/", include_in_schema=False)
     @app.get("/index.html", include_in_schema=False)
-    def index():
+    def index(request: Request):
         """The page, with each file's URL stamped by its last-modified time
         (/app.js?v=…), so a browser can never keep running an old copy after an update."""
+        if not request.session.get("ok"):
+            return RedirectResponse("/auth/login?next=/", status_code=303)
         html = (WEB_DIR / "index.html").read_text(encoding="utf-8")
         for name in ("app.js", "styles.css"):
             v = int((WEB_DIR / name).stat().st_mtime)

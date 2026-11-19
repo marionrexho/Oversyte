@@ -22,7 +22,8 @@
     const res = await fetch(path, init);
     if (res.status === 401 && path !== "/api/login") {
       state.me.authed = false;
-      renderLogin();
+      const next = encodeURIComponent(location.pathname + location.hash || "/");
+      location.replace(`/auth/login?next=${next}`);
       throw new AuthError("Sign in required");
     }
     const data = res.headers.get("content-type")?.includes("json") ? await res.json() : null;
@@ -142,57 +143,8 @@
 
   // ---------- login ----------
   function renderLogin() {
-    cleanupView();
-    const store = esc(state.me.store_name || "your store");
-    app.innerHTML = `
-      <div class="auth">
-        <section class="auth-hero">
-          <div class="hero-alert">${I.alert}<div><b>Possible theft · Aisle 2</b><small>Alert sent to staff and owner · just now</small></div></div>
-          <p class="tag">See more. Lose less.</p>
-          <h1>Stop theft the moment it happens.</h1>
-          <p class="lead">AI that plugs into the cameras you already have, spots theft in real time, and instantly alerts your staff and you.</p>
-          <div class="for"><span>Convenience stores</span><span>Gas stations</span><span>Truck stops</span></div>
-        </section>
-        <section class="auth-form">
-          <form class="auth-card" id="login">
-            <img class="logo" src="/brand/oversyte-logo-sm.png" alt="Oversyte">
-            <h2>Sign in</h2>
-            <p class="muted">Review alerts and video clips for your store.</p>
-            <div class="store-badge"><span class="ico-tile">${I.store}</span>
-              <div class="grow"><small>Store</small><b>${store}</b></div><span class="pulse" title="Monitoring"></span></div>
-            <label class="field"><span>Password</span>
-              <div class="input-wrap">${I.lock}
-                <input type="password" name="password" autocomplete="current-password" placeholder="Enter store password" required autofocus>
-                <button type="button" class="peek" aria-label="Show password" title="Show password">${I.eye}</button>
-              </div></label>
-            <button class="btn primary block signin" type="submit">Sign in ${I.chevron}</button>
-            <p class="small login-err" id="login-err" role="alert"></p>
-            <div class="secure">${I.check}<span>Encrypted session · Video never leaves your store</span></div>
-          </form>
-          <p class="auth-legal">© ${new Date().getFullYear()} Oversyte · <a href="https://oversyteai.com" target="_blank" rel="noopener">oversyteai.com</a></p>
-        </section>
-      </div>`;
-    $(".peek").onclick = (e) => {
-      const input = $("#login input[name=password]");
-      const show = input.type === "password";
-      input.type = show ? "text" : "password";
-      e.currentTarget.setAttribute("aria-label", show ? "Hide password" : "Show password");
-      e.currentTarget.classList.toggle("on", show);
-      input.focus();
-    };
-    $("#login").onsubmit = async (e) => {
-      e.preventDefault();
-      const btn = $("button[type=submit]", e.target);
-      btn.disabled = true;
-      try {
-        await api("/api/login", { method: "POST", body: { password: e.target.password.value } });
-        state.me.authed = true;
-        startPolling();
-        route();
-      } catch (err) {
-        $("#login-err").textContent = err.message;
-      } finally { btn.disabled = false; }
-    };
+    const next = encodeURIComponent(location.pathname + location.hash || "/");
+    location.replace(`/auth/login?next=${next}`);
   }
 
   // ---------- alerts ----------
@@ -302,7 +254,7 @@
         <div><p class="ov-date">${greeting()} · ${now}</p><h1>Overview</h1></div>
         <button class="btn small" type="button" data-test aria-label="Send test alert">${I.send}<span class="lbl">Send test alert</span></button>
       </div>
-      ${state.me.default_password ? `<div class="banner warn">${I.lock}<div>The dashboard password is still the default. Change <b>dashboard_password</b> in config.yaml.</div></div>` : ""}
+
       <div id="strip"></div>
       <div class="metrics" id="metrics">${metricsHTML({ today: "–", unreviewed: 0, theft_week: "–", false_alarm_week: 0 })}</div>
       <div class="ov2">
