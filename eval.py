@@ -171,7 +171,9 @@ def main():
     missed = [(v["name"], m) for v in per_video for m in v["missed"]]
     fas = [(v["name"], d) for v in per_video for d in v["detections"] if not d["matched"]]
     if missed:
-        print("\n  Missed thefts (open them in the Accuracy lab to see why):")
+        print("\n  Thefts missed by the detector:")
+        print("  These were manually labeled, but the detector did not alert within the time tolerance.")
+        print("  Open them in the Accuracy lab to inspect why:")
         for n, m in missed[:25]:
             print(f"    {n} @ {m['t']:.1f}s  ({ev.EVENT_TYPES.get(m['type'], m['type'])})")
     if fas:
