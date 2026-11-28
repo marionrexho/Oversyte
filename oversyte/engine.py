@@ -12,6 +12,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from .analysis import Scheduler, use_batching
 from .camera import Camera
 from .camera_setup import CameraList
 from .clips import write_clip
@@ -59,9 +60,11 @@ class Zones:
                 for k, polys in self.get(cam_id).items()}
 
 
-class CameraWorker(threading.Thread):
+class CameraWorker:
+    """One camera: capture, theft-rule state, recent results. The AI itself runs in the
+    engine's shared Scheduler, which batches frames from all cameras."""
+
     def __init__(self, engine: "Engine", cam_cfg: dict):
-        super().__init__(daemon=True, name=f"ai-{cam_cfg['id']}")
         self.engine = engine
         fps = float(engine.cfg["detection"]["analysis_fps"])
         self.added_from = cam_cfg.get("added_from", "config")
@@ -76,54 +79,67 @@ class CameraWorker(threading.Thread):
         self.annotations: deque[tuple[float, dict]] = deque(maxlen=int(keep * fps) + 10)
         self.last_result = None  # (ts, persons, items, bags)
         self.analysis_ms = 0.0
-        self.ai_error: str | None = None
-        self.ai_ready = False
-        self._stop = threading.Event()
+        # read by the Scheduler to decide when this camera is due
+        self.last_analysis = 0.0
+        self.last_ts = 0.0
+        self.active = True
 
     @property
     def id(self):
         return self.camera.id
 
+    def start(self):
+        self.camera.start()
+        if self.engine.scheduler is None:  # CPU: this camera runs its own AI loop
+            self._stop = threading.Event()
+            threading.Thread(target=self._cpu_loop, daemon=True, name=f"ai-{self.id}").start()
+
     def stop(self):
-        self._stop.set()
+        if hasattr(self, "_stop"):
+            self._stop.set()
         self.camera.stop()
 
-    def run(self):
-        self.camera.start()
+    def _cpu_loop(self):
         try:
             from .detector import FrameAnalyzer
             analyzer = FrameAnalyzer(self.engine.cfg["detection"], self.engine.object_model)
-            self.ai_ready = True
+            self.cpu_ready = True
         except Exception as e:  # model failed to load
             log.exception("[%s] could not load AI models", self.id)
-            self.ai_error = f"AI model failed to load: {e}"
+            self.cpu_error = f"AI model failed to load: {e}"
             return
-        last_ts = 0.0
         while not self._stop.is_set():
             t0 = time.time()
             ts, frame = self.camera.latest()
-            if frame is None or ts == last_ts:
-                self._stop.wait(0.05)
+            if frame is None or ts == self.last_ts:
+                self._stop.wait(0.02)
                 continue
-            last_ts = ts
+            self.last_ts = ts
             try:
-                # bags/items only matter once someone has reached into a shelf
-                persons, items, bags = analyzer.analyze(frame, need_objects=self.detector.busy())
-                zones = self.engine.zones.pixels(self.id, frame.shape[1::-1])
-                dets = self.detector.update(ts, persons, items, bags,
-                                            zones["shelf"], zones["ignore"])
+                persons, items, bags = analyzer.analyze(frame, need_objects=self.need_objects())
+                self.handle(ts, persons, items, bags, (time.time() - t0) * 1000)
             except Exception:
                 log.exception("[%s] analysis error", self.id)
                 self._stop.wait(1)
                 continue
-            self.annotations.append((ts, {p.track_id: p.box for p in persons}))
-            self.last_result = (ts, persons, items, bags)
-            self.analysis_ms = (time.time() - t0) * 1000
-            for d in dets:
-                log.info("[%s] DETECTION track=%s score=%.2f %s", self.id, d.track_id, d.score, d.reason)
-                self.engine.on_detection(self, d)
-            interval = self.interval if persons or self.detector.busy() else self.idle_interval
+            interval = self.interval if self.active else self.idle_interval
             self._stop.wait(max(0.0, interval - (time.time() - t0)))
+
+    def need_objects(self) -> bool:
+        return self.detector.busy()  # bags/items only matter once someone has reached into a shelf
+
+    def handle(self, ts: float, persons: list, items: list, bags: list, ms: float):
+        """Results for one frame, from the Scheduler: run the theft rules, raise detections."""
+        size = self.camera.frame_size or (1, 1)
+        zones = self.engine.zones.pixels(self.id, size)
+        dets = self.detector.update(ts, persons, items, bags, zones["shelf"], zones["ignore"])
+        self.annotations.append((ts, {p.track_id: p.box for p in persons}))
+        self.last_result = (ts, persons, items, bags)
+        self.analysis_ms = ms
+        self.active = bool(persons) or self.detector.busy()
+        for d in dets:
+            log.info("[%s] DETECTION track=%s score=%.2f %s", self.id, d.track_id, d.score, d.reason)
+            self.engine.on_detection(self, d)
 
     # ---------- live view ----------
     def overlay_jpeg(self) -> bytes | None:
@@ -161,12 +177,15 @@ class CameraWorker(threading.Thread):
     def status(self) -> dict:
         ts, _ = self.camera.latest()
         res = self.last_result
+        sched = self.engine.scheduler
+        ai_ready = sched.ready.is_set() if sched else getattr(self, "cpu_ready", False)
+        ai_error = sched.error if sched else getattr(self, "cpu_error", None)
         return {
             "id": self.id,
             "name": self.camera.name,
             "connected": self.camera.connected,
-            "error": self.ai_error or self.camera.error,
-            "ai_ready": self.ai_ready,
+            "error": ai_error or self.camera.error,
+            "ai_ready": bool(ai_ready),
             "frame_age": round(time.time() - ts, 1) if ts else None,
             "fps": round(self.camera.measured_fps, 1),
             "analysis_ms": round(self.analysis_ms),
@@ -188,6 +207,7 @@ class Engine:
         self.zones = Zones(self.data_dir / "zones.json")
         self.camera_list = CameraList(self.data_dir / "cameras.json")  # added from the dashboard
         self.object_model = None
+        self.scheduler: Scheduler | None = None
         self.workers: dict[str, CameraWorker] = {}
         self._workers_lock = threading.Lock()
         self.listeners: list = []  # callables(event_dict) e.g. live UI refresh
@@ -199,6 +219,9 @@ class Engine:
             self.object_model = FrameAnalyzer.load_object_model(self.cfg["detection"])
         except Exception:
             log.exception("object model failed to load; continuing with pose only")
+        if use_batching(self.cfg["detection"]):  # GPU: one worker batches all cameras
+            self.scheduler = Scheduler(self.cfg["detection"], lambda: self.workers.values(), self.object_model)
+            self.scheduler.start()
         for cam in self.cfg["cameras"]:
             if cam.get("enabled", True):
                 self._start_worker(dict(cam, added_from="config"))
@@ -209,6 +232,8 @@ class Engine:
 
     def stop(self):
         self._stop.set()
+        if self.scheduler:
+            self.scheduler.stop()
         for w in list(self.workers.values()):
             w.stop()
 

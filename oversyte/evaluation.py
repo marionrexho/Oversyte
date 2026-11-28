@@ -222,6 +222,8 @@ def _cache_key(path: Path, det_cfg: dict, clip_cfg: dict, name: str | None = Non
              Path(det_cfg["pose_model"]).name, Path(det_cfg.get("object_model") or "-").name,
              det_cfg["analysis_fps"], det_cfg["imgsz"], det_cfg["person_conf"],
              det_cfg["object_conf"], clip_cfg["max_width"]]
+    if str(det_cfg.get("device", "cpu")).lower() not in ("cpu", "mps"):
+        parts.append("gpu-square")  # GPU runs pad differently (detector.gpu_args); CPU keys unchanged
     return hashlib.sha1(repr(parts).encode()).hexdigest()[:12]
 
 

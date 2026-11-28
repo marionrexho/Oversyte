@@ -23,6 +23,33 @@ ITEM_CLASSES = {
 _load_lock = threading.Lock()
 
 
+def gpu_args() -> dict:
+    """Model settings on a GPU, shared by the single-camera and the batched path so both see
+    exactly the same input: 16-bit, and every frame padded to a full square (`rect=False`).
+    A batch of differently sized frames is always padded to a square, so a single frame must
+    be too, or live results and eval.py would differ."""
+    return {"half": True, "rect": False}
+
+
+def persons_from(res) -> list[Person]:
+    """Tracked people in one YOLO pose result (people without a track id are left out)."""
+    if res.boxes is None or res.boxes.id is None or res.keypoints is None:
+        return []
+    boxes = res.boxes.xyxy.cpu().numpy()
+    ids = res.boxes.id.int().cpu().numpy()
+    kpts = res.keypoints.data.cpu().numpy()
+    return [Person(int(i), tuple(float(v) for v in b), k) for b, i, k in zip(boxes, ids, kpts)]
+
+
+def objects_from(res) -> tuple[list, list]:
+    """(items, bags) boxes in one YOLO detection result."""
+    items, bags = [], []
+    if res.boxes is not None:
+        for b, c in zip(res.boxes.xyxy.cpu().numpy(), res.boxes.cls.int().cpu().numpy()):
+            (bags if int(c) in BAG_CLASSES else items).append(tuple(float(v) for v in b))
+    return items, bags
+
+
 def _load(path: str):
     from ultralytics import YOLO
     with _load_lock:  # first run downloads weights; don't download twice in parallel
@@ -39,7 +66,7 @@ class FrameAnalyzer:
         self.imgsz = int(det_cfg["imgsz"])
         # NVIDIA GPUs run the models about twice as fast in 16-bit; CPUs don't support it.
         self.half = str(self.device).lower() not in ("cpu", "mps")
-        self._extra = {"half": True} if self.half else {}
+        self._extra = gpu_args() if self.half else {}
         self.pose = _load(det_cfg["pose_model"])
         self.objects = shared_object_model
         self._obj_lock = threading.Lock()
@@ -55,14 +82,7 @@ class FrameAnalyzer:
             conf=float(self.cfg["person_conf"]), imgsz=self.imgsz,
             device=self.device, verbose=False, **self._extra,
         )[0]
-        persons: list[Person] = []
-        if res.boxes is not None and res.boxes.id is not None and res.keypoints is not None:
-            boxes = res.boxes.xyxy.cpu().numpy()
-            ids = res.boxes.id.int().cpu().numpy()
-            kpts = res.keypoints.data.cpu().numpy()
-            for b, i, k in zip(boxes, ids, kpts):
-                persons.append(Person(int(i), tuple(float(v) for v in b), k))
-
+        persons = persons_from(res)
         items, bags = [], []
         if self.objects is not None and persons and need_objects:
             with self._obj_lock:
@@ -71,8 +91,5 @@ class FrameAnalyzer:
                     conf=float(self.cfg["object_conf"]), imgsz=self.imgsz,
                     device=self.device, verbose=False, **self._extra,
                 )[0]
-            if r.boxes is not None:
-                for b, c in zip(r.boxes.xyxy.cpu().numpy(), r.boxes.cls.int().cpu().numpy()):
-                    box = tuple(float(v) for v in b)
-                    (bags if int(c) in BAG_CLASSES else items).append(box)
+            items, bags = objects_from(r)
         return persons, items, bags

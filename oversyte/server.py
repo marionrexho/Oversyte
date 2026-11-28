@@ -308,7 +308,7 @@ def create_app(cfg: dict) -> FastAPI:
             "daily": store.daily(14),
             "cameras": {"total": len(engine.workers),
                         "online": sum(w.camera.connected for w in engine.workers.values()),
-                        "ai_ready": sum(w.ai_ready for w in engine.workers.values())},
+                        "ai_ready": sum(w.status()["ai_ready"] for w in engine.workers.values())},
             "devices": len(store.subs()),
             "zones": zones,
             "has_test_alert": store.has_test_alert(),
