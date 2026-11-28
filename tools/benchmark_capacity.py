@@ -6,8 +6,12 @@
 
 Each fake camera is a test video from eval/videos played on a loop in real time, through the
 same capture code (camera.py), AI (detector.py) and theft rules (concealment.py) that a live
-camera uses. A camera "keeps up" when it gets at least 90% of analysis_fps frames analysed.
-The answer is the largest step where every camera kept up.
+camera uses. Cameras analyse at analysis_fps while someone is in view and at idle_analysis_fps
+when the view is empty. A camera "keeps up" ("slowest cam" >= 90%) when it gets at least 90% of
+the frames it asked for. The answer is the largest step where every camera kept up.
+
+The test videos have people in view most of the time, so this is close to a busy store's worst
+case; real cameras spend much of the day on empty aisles and cost less.
 """
 import argparse
 import shutil
@@ -34,6 +38,9 @@ class FakeCameraWorker(threading.Thread):
         super().__init__(daemon=True)
         self.cam, self.det_cfg, self.object_model = cam, det_cfg, object_model
         self.interval = 1.0 / fps
+        idle_fps = float(det_cfg.get("idle_analysis_fps") or fps)
+        self.idle_interval = 1.0 / min(idle_fps, fps)
+        self.busy_frames = 0  # frames analysed at full rate (someone in view)
         self.detector = ConcealmentDetector(det_cfg)
         self.ready = threading.Event()
         self.stop_ev = threading.Event()
@@ -55,7 +62,10 @@ class FakeCameraWorker(threading.Thread):
             self.detector.update(ts, persons, items, bags, [], [])
             self.count += 1
             self.busy_s += time.time() - t0
-            self.stop_ev.wait(max(0.0, self.interval - (time.time() - t0)))
+            active = bool(persons) or self.detector.busy()
+            self.busy_frames += active
+            interval = self.interval if active else self.idle_interval
+            self.stop_ev.wait(max(0.0, interval - (time.time() - t0)))
 
 
 def gpu_util() -> str:
@@ -75,7 +85,7 @@ def run_step(n: int, videos: list[Path], cfg: dict, object_model, fps: float,
     cams, workers = [], []
     for i in range(n):
         cam = Camera({"id": f"bench{i}", "name": f"bench{i}", "source": str(videos[i % len(videos)]),
-                      "loop": True}, cfg["clips"])
+                      "loop": True}, cfg["clips"], analysis_fps=fps)
         cam.start()
         w = FakeCameraWorker(cam, cfg["detection"], object_model, fps)
         w.start()
@@ -84,18 +94,24 @@ def run_step(n: int, videos: list[Path], cfg: dict, object_model, fps: float,
     for w in workers:
         w.ready.wait(120)
     time.sleep(warmup)
-    start = [(w.count, w.busy_s) for w in workers]
+    start = [(w.count, w.busy_s, w.busy_frames) for w in workers]
     t0 = time.time()
     gpu = []
     while time.time() - t0 < measure:
         time.sleep(min(5, measure))
         gpu.append(gpu_util())
     elapsed = time.time() - t0
-    rates, ms = [], []
-    for w, (c0, b0) in zip(workers, start):
+    rates, ms, kept, active_share = [], [], [], []
+    for w, (c0, b0, a0) in zip(workers, start):
         frames = w.count - c0
+        active = w.busy_frames - a0
         rates.append(frames / elapsed)
         ms.append((w.busy_s - b0) / frames * 1000 if frames else float("inf"))
+        # A camera keeps up when its frames cover the measuring time at the rate it asked for:
+        # full rate while someone was in view, idle rate otherwise.
+        covered = active * w.interval + (frames - active) * w.idle_interval
+        kept.append(covered / elapsed)
+        active_share.append(active / frames if frames else 0.0)
     for w in workers:
         w.stop_ev.set()
     for c in cams:
@@ -103,9 +119,9 @@ def run_step(n: int, videos: list[Path], cfg: dict, object_model, fps: float,
     for w in workers:
         w.join(5)
     time.sleep(1)
-    return {"n": n, "min": min(rates), "avg": sum(rates) / n, "ms": sum(ms) / n,
-            "gpu": gpu[len(gpu) // 2] if gpu else "-",
-            "ok": min(rates) >= KEEP_UP * fps}
+    return {"n": n, "kept": min(kept), "avg": sum(rates) / n, "ms": sum(ms) / n,
+            "people": sum(active_share) / n, "gpu": gpu[len(gpu) // 2] if gpu else "-",
+            "ok": min(kept) >= KEEP_UP}
 
 
 def main():
@@ -135,7 +151,8 @@ def main():
     steps = [int(x) for x in args.cams.split(",")] if args.cams else None
     print(f"device={det['device']}  imgsz={det['imgsz']}  target={fps:g} frames/s per camera  "
           f"videos={len(videos)}  {args.seconds:g}s per step\n")
-    print(f"{'cameras':>7}  {'slowest cam':>11}  {'average':>8}  {'ms/frame':>8}  {'GPU use / mem':>15}  result")
+    print(f"{'cameras':>7}  {'slowest cam':>11}  {'frames/s':>8}  {'ms/frame':>8}  {'people in view':>14}  "
+          f"{'GPU use / mem':>15}  result")
 
     best, n, results = 0, 1, []
     while True:
@@ -145,7 +162,8 @@ def main():
             n = steps.pop(0)
         r = run_step(n, videos, cfg, object_model, fps, args.warmup, args.seconds)
         results.append(r)
-        print(f"{r['n']:>7}  {r['min']:>9.1f}/s  {r['avg']:>6.1f}/s  {r['ms']:>8.0f}  {r['gpu']:>15}  "
+        print(f"{r['n']:>7}  {r['kept'] * 100:>10.0f}%  {r['avg']:>8.1f}  {r['ms']:>8.0f}  "
+              f"{r['people'] * 100:>13.0f}%  {r['gpu']:>15}  "
               f"{'keeps up' if r['ok'] else 'TOO SLOW'}", flush=True)
         if r["ok"]:
             best = max(best, n)

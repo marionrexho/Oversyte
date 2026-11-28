@@ -481,3 +481,26 @@ pre.code code { background: none; color: inherit; padding: 0; }
 @keyframes notifIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: none; } }
 @keyframes shake { 20%, 60% { transform: translateX(-5px); } 40%, 80% { transform: translateX(5px); } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+
+/* ---------- add camera wizard ---------- */
+.wiz-steps { display: flex; gap: 8px; list-style: none; margin: 0 0 16px; padding: 0; flex-wrap: wrap; }
+.wiz-steps li { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; color: var(--faint); }
+.wiz-steps li + li::before { content: ""; width: 22px; height: 1px; background: var(--border-strong); margin-right: 2px; }
+.wiz-steps i { width: 24px; height: 24px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-style: normal; font-size: 12px; background: var(--surface-2); border: 1px solid var(--border); }
+.wiz-steps i .ico { width: 15px; height: 15px; }
+.wiz-steps li.on { color: var(--navy); }
+.wiz-steps li.on i { background: var(--navy); border-color: var(--navy); color: #fff; }
+.wiz-steps li.done { color: var(--ok); }
+.wiz-steps li.done i { background: var(--ok-bg); border-color: #bfe6d4; }
+.brand-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.brand-opt { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding: 16px; border: 1px solid var(--border-strong); border-radius: 12px; background: var(--surface); font: inherit; color: var(--text); cursor: pointer; text-align: left; transition: border-color .12s, box-shadow .12s; }
+.brand-opt .ico { width: 22px; height: 22px; color: var(--navy); }
+.brand-opt:hover { border-color: var(--blue); }
+.brand-opt.on { border-color: var(--navy); box-shadow: 0 0 0 3px rgba(1, 35, 96, .12); }
+.form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
+.form-grid small { display: block; margin-top: 6px; font-size: 12px; }
+label.check { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; grid-column: 1 / -1; }
+label.check input { margin-top: 3px; }
+.wiz-snap { display: block; width: 100%; max-height: 480px; object-fit: contain; border-radius: 10px; background: #000; }
+.wiz-wait { text-align: center; padding: 28px 22px; }
+.wiz-wait .spinner { margin: 6px auto 4px; }

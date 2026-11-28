@@ -72,6 +72,8 @@
     chevron: svg(`<path d="m9 18 6-6-6-6"/>`),
     lock: svg(`<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>`),
     store: svg(`<path d="M2 10l2-6h16l2 6z"/><path d="M4 10v10h16V10"/><path d="M10 20v-5h4v5"/>`),
+    plus: svg(`<path d="M12 5v14"/><path d="M5 12h14"/>`),
+    wifi: svg(`<path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><path d="M12 20h.01"/>`),
     zone: svg(`<path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><rect x="7" y="7" width="10" height="10" rx="1"/>`),
   };
   const ICON = {
@@ -203,7 +205,7 @@
   /** Setup steps, in order. ok = done; act = link, "test", or null (done by the installer). */
   function setupSteps(o) {
     const s = [
-      { ok: o.cameras.total > 0, title: "Connect cameras", act: null },
+      { ok: o.cameras.total > 0, title: "Connect cameras", act: "#/add-camera", btn: "Connect a camera" },
       { ok: o.zones > 0, title: "Mark shelves", act: o.cameras.total ? "#/cameras" : null, btn: "Mark shelves" },
       { ok: o.devices > 0, title: "Phone alerts", act: "#/settings", btn: "Set up phone alerts" },
       { ok: o.has_test_alert, title: "Test alert", act: "test", btn: "Send a test alert" },
@@ -425,13 +427,14 @@
   async function camerasView() {
     const view = shell("cameras", pageHead("Monitor", "Cameras",
       DEMO ? "Recorded store footage with Oversyte's AI overlay, on a loop." : "Live feeds with AI overlay. Open a camera to draw shelf zones.",
-      `<div class="row">${liveChip()}</div>`)
+      `<div class="row">${liveChip()}${DEMO ? "" : `<a class="btn small primary" href="#/add-camera">${I.plus}Add camera</a>`}</div>`)
       + `<div class="cams" id="cams"></div>`);
     const cams = await api("/api/cameras");
     const grid = $("#cams", view);
     if (!cams.length) {
       grid.outerHTML = `<div class="card card-head"><span class="ico-tile">${ICON.cam}</span><div class="grow"><h2>No cameras yet</h2>
-        <p>Add your cameras to <b>config.yaml</b> under <code>cameras:</code> (RTSP address, webcam number or a video file) and restart Oversyte.</p></div></div>`;
+        <p>Connect your store's cameras in a few steps. You'll need each camera's IP address and login.</p></div>
+        <a class="btn primary" href="#/add-camera">${I.plus}Add camera</a></div>`;
       return;
     }
     grid.innerHTML = cams.map((c) => `
@@ -463,7 +466,8 @@
     const view = shell("cameras", `
       <a class="back" href="#/cameras">${ICON.back}All cameras</a>
       ${pageHead(DEMO ? "Camera" : "Live camera", esc(cam.name), `<span id="camline">${camLine(cam)}</span>`,
-        DEMO ? "" : `<button class="btn" id="edit">${I.zone}Edit zones</button>`)}
+        DEMO ? "" : `<div class="row">${cam.added_from === "dashboard" ? `<button class="btn ghost" id="remove">${I.trash}Remove</button>` : ""}
+          <button class="btn" id="edit">${I.zone}Edit zones</button></div>`)}
       <div class="stack">
         <div class="live-wrap" id="wrap">${cam.video_url ? feedVideo(cam, "live") : `<img data-live id="live" src="/api/cameras/${enc}/live" alt="">`}
           <span class="live-badge ${cam.connected ? "" : "offline"}"><span class="pulse"></span>${DEMO ? "DEMO FEED" : cam.connected ? "LIVE" : "OFFLINE"}</span></div>
@@ -499,6 +503,141 @@
     state.cleanup.push(() => clearInterval(t));
 
     $("#edit", view)?.addEventListener("click", () => zoneEditor(id, view, () => { panel.innerHTML = legendHTML; bindTest(); }));
+    $("#remove", view)?.addEventListener("click", async () => {
+      if (!confirm(`Remove "${cam.name}"? Oversyte stops watching it. Its past alerts are kept.`)) return;
+      try {
+        await api(`/api/cameras/${enc}`, { method: "DELETE" });
+        toast(`${cam.name} removed`);
+        await refreshBadge();
+        location.hash = hasCams() ? "#/cameras" : "#/";
+      } catch (e) { handleErr(e); }
+    });
+    // arriving from the Add camera wizard: open the zone editor straight away
+    if (sessionStorage.getItem("oversyte-draw") === id) {
+      sessionStorage.removeItem("oversyte-draw");
+      $("#edit", view)?.click();
+    }
+  }
+
+  // ---------- add camera wizard ----------
+  const CAM_BRANDS = [
+    { id: "hikvision", name: "Hikvision", help: "Find the IP address with Hikvision's free <b>SADP</b> tool, or on the recorder's screen under Network. If your cameras plug into a recorder (NVR), use the recorder's IP and the camera's number on it." },
+    { id: "dahua", name: "Dahua / Amcrest", help: "Find the IP address with Dahua's <b>ConfigTool</b>, or in the recorder's Network menu. If cameras plug into a recorder, use the recorder's IP and the camera's channel number." },
+    { id: "reolink", name: "Reolink", help: "Switch RTSP on first: Reolink app → camera Settings → Network → Advanced → Server settings → <b>RTSP</b>. The IP address is under Network information." },
+    { id: "uniview", name: "Uniview", help: "Find the IP address with Uniview's <b>EZTools</b>, or in the recorder's Network menu." },
+    { id: "other", name: "Other brand", help: "Paste the camera's RTSP address. The manual or the maker's website lists the format; it starts with <code>rtsp://</code>." },
+  ];
+
+  async function addCameraView() {
+    const view = shell("cameras", `<a class="back" href="${hasCams() ? "#/cameras" : "#/"}">${ICON.back}${hasCams() ? "All cameras" : "Overview"}</a>`
+      + pageHead("Setup", "Add a camera", "Connect one of the store's cameras. It takes about two minutes.") + `<div id="wiz"></div>`);
+    const wiz = $("#wiz", view);
+    const f = { brand: "", name: "", host: "", port: "", username: "admin", password: "", channel: 1, substream: true, url: "" };
+    let step = 1, result = null, busy = false;
+    const STEPS = ["Brand", "Details", "Test", "Done"];
+    const brand = () => CAM_BRANDS.find((b) => b.id === f.brand);
+    const body = () => ({ ...f, port: f.port ? +f.port : null, channel: +f.channel || 1 });
+    const stepsHTML = () => `<ol class="wiz-steps">${STEPS.map((s, i) =>
+      `<li class="${i + 1 < step ? "done" : i + 1 === step ? "on" : ""}"><i>${i + 1 < step ? I.check : i + 1}</i>${s}</li>`).join("")}</ol>`;
+    const networkNote = `<div class="banner info" style="margin:0">${I.wifi}<div>Oversyte connects from this server to the camera, so it must be able to reach it:
+      on the same network as this computer, or through a <b>Tailscale</b> connection to the store. Connecting Hikvision cameras straight over the internet, with nothing to set up at the store, is coming soon.</div></div>`;
+
+    const read = () => $$("[data-f]", wiz).forEach((el) => {
+      f[el.dataset.f] = el.type === "checkbox" ? el.checked : el.value.trim();
+    });
+
+    function paint() {
+      let html = stepsHTML();
+      if (step === 1) {
+        html += `<div class="card stack"><h2>Which brand is the camera or recorder?</h2>
+          <div class="brand-grid">${CAM_BRANDS.map((b) => `<button type="button" class="brand-opt ${f.brand === b.id ? "on" : ""}" data-brand="${b.id}">${ICON.cam}<b>${b.name}</b></button>`).join("")}</div>
+          <p class="small muted" style="margin:0">Not sure? The brand is usually printed on the camera or the recorder box.</p></div>`;
+      } else if (step === 2) {
+        const other = f.brand === "other";
+        html += `<div class="card stack">
+          <div class="card-head"><span class="ico-tile">${ICON.cam}</span><div class="grow"><h2>${esc(brand().name)} camera details</h2>
+            <p>${brand().help}</p></div></div>
+          <label class="field"><span>Camera name (shown on alerts)</span><input type="text" data-f="name" maxlength="60" placeholder="Aisle 1" value="${esc(f.name)}"></label>
+          ${other ? `<label class="field"><span>Stream address</span><input type="text" data-f="url" placeholder="rtsp://user:password@192.168.1.64:554/stream" value="${esc(f.url)}" autocomplete="off" spellcheck="false"></label>` : `
+          <div class="form-grid">
+            <label class="field"><span>IP address</span><input type="text" data-f="host" placeholder="192.168.1.64" value="${esc(f.host)}" inputmode="decimal" autocomplete="off" spellcheck="false"></label>
+            <label class="field"><span>Camera number</span><input type="text" data-f="channel" value="${esc(f.channel)}" inputmode="numeric"><small class="muted">1 for a single camera; its channel on a recorder</small></label>
+            <label class="field"><span>Username</span><input type="text" data-f="username" value="${esc(f.username)}" autocomplete="off" spellcheck="false"></label>
+            <label class="field"><span>Password</span><input type="password" data-f="password" value="${esc(f.password)}" autocomplete="new-password"></label>
+          </div>
+          <details class="adv"><summary>Advanced</summary><div class="form-grid" style="margin-top:12px">
+            <label class="field"><span>RTSP port</span><input type="text" data-f="port" placeholder="554" value="${esc(f.port)}" inputmode="numeric"></label>
+            <label class="check"><input type="checkbox" data-f="substream" ${f.substream ? "checked" : ""}> Use the low-resolution sub-stream (recommended: lighter on the store's internet, enough for detection)</label>
+          </div></details>`}
+          ${networkNote}
+          <div class="row"><button class="btn" type="button" data-back>Back</button><span class="grow"></span>
+            <button class="btn primary" type="button" data-next>Test connection</button></div></div>`;
+      } else if (step === 3) {
+        if (busy) {
+          html += `<div class="card stack wiz-wait"><span class="spinner"></span><h2>Connecting to the camera…</h2>
+            <p class="muted">This can take up to 15 seconds.</p></div>`;
+        } else if (result?.ok) {
+          html += `<div class="card stack">
+            <div class="card-head"><span class="ico-tile green">${I.check}</span><div class="grow"><h2>Connected</h2>
+              <p>Is this the right camera? ${result.width}×${result.height} video from <code>${esc(result.address)}</code></p></div></div>
+            <img class="wiz-snap" src="${result.snapshot}" alt="Snapshot from the camera">
+            <div class="row"><button class="btn" type="button" data-back>Back</button><span class="grow"></span>
+              <button class="btn primary" type="button" data-save>${I.plus}Add ${esc(f.name || "camera")}</button></div></div>`;
+        } else {
+          html += `<div class="card stack">
+            <div class="card-head"><span class="ico-tile red">${I.x}</span><div class="grow"><h2>${esc(result?.error || "Couldn't connect")}</h2>
+              <p>${esc(result?.hint || "")}</p></div></div>
+            ${result?.address ? `<p class="small muted" style="margin:0">Tried <code>${esc(result.address)}</code></p>` : ""}
+            ${networkNote}
+            <div class="row"><button class="btn" type="button" data-back>Change details</button><span class="grow"></span>
+              <button class="btn primary" type="button" data-retry>Try again</button></div></div>`;
+        }
+      } else {
+        html += `<div class="card stack">
+          <div class="card-head"><span class="ico-tile green">${I.check}</span><div class="grow"><h2>${esc(result.cam.name)} is connected</h2>
+            <p>Oversyte is watching it now. Next, draw where the shelves are so it knows what counts as reaching for a product.</p></div></div>
+          <div class="row"><a class="btn" href="#/add-camera" data-again>${I.plus}Add another camera</a><span class="grow"></span>
+            <button class="btn primary" type="button" data-zones>${I.zone}Mark shelves</button></div></div>`;
+      }
+      wiz.innerHTML = html;
+      bind();
+    }
+
+    async function test() {
+      read();
+      step = 3; busy = true; result = null; paint();
+      try { result = await api("/api/cameras/test", { method: "POST", body: body() }); }
+      catch (e) {
+        if (e instanceof AuthError) return;
+        result = { ok: false, error: e.message, hint: "" };
+        if (/address|brand|number/i.test(e.message)) { step = 2; busy = false; paint(); toast(e.message); return; }
+      }
+      busy = false; paint();
+    }
+
+    function bind() {
+      $$("[data-brand]", wiz).forEach((b) => (b.onclick = () => { f.brand = b.dataset.brand; step = 2; paint(); $("[data-f=name]", wiz)?.focus(); }));
+      $("[data-back]", wiz)?.addEventListener("click", () => { if (step === 2) read(); step -= 1; paint(); });
+      $("[data-next]", wiz)?.addEventListener("click", test);
+      $("[data-retry]", wiz)?.addEventListener("click", test);
+      $$("input", wiz).forEach((el) => el.addEventListener("keydown", (e) => { if (e.key === "Enter") test(); }));
+      $("[data-save]", wiz)?.addEventListener("click", async (e) => {
+        e.currentTarget.disabled = true;
+        try {
+          const cam = await api("/api/cameras", { method: "POST", body: body() });
+          result = { ...result, cam }; step = 4; paint();
+          refreshBadge();
+        } catch (err) { handleErr(err); e.currentTarget.disabled = false; }
+      });
+      $("[data-zones]", wiz)?.addEventListener("click", async () => {
+        await refreshBadge();
+        sessionStorage.setItem("oversyte-draw", result.cam.id);
+        location.hash = `#/camera/${encodeURIComponent(result.cam.id)}`;
+      });
+      $("[data-again]", wiz)?.addEventListener("click", (e) => { e.preventDefault(); addCameraView(); });
+    }
+
+    paint();
   }
 
   async function zoneEditor(id, view, onDone) {
@@ -1248,6 +1387,8 @@
     try {
       if (!page) await alertsView();
       else if (page === "event") await eventView(decodeURIComponent(arg));
+      else if (page === "add-camera" && DEMO) location.hash = "#/";
+      else if (page === "add-camera") await addCameraView();
       else if ((page === "cameras" || page === "camera") && !hasCams()) location.hash = "#/";
       else if (page === "cameras") await camerasView();
       else if (page === "camera") await cameraView(decodeURIComponent(arg));

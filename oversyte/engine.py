@@ -13,6 +13,7 @@ import cv2
 import numpy as np
 
 from .camera import Camera
+from .camera_setup import CameraList
 from .clips import write_clip
 from .concealment import ConcealmentDetector, Detection
 from .push import Pusher
@@ -62,10 +63,15 @@ class CameraWorker(threading.Thread):
     def __init__(self, engine: "Engine", cam_cfg: dict):
         super().__init__(daemon=True, name=f"ai-{cam_cfg['id']}")
         self.engine = engine
-        self.camera = Camera(cam_cfg, engine.cfg["clips"])
-        self.detector = ConcealmentDetector(engine.cfg["detection"])
         fps = float(engine.cfg["detection"]["analysis_fps"])
+        self.added_from = cam_cfg.get("added_from", "config")
+        self.brand = cam_cfg.get("brand")
+        self.camera = Camera(cam_cfg, engine.cfg["clips"], analysis_fps=fps)
+        self.detector = ConcealmentDetector(engine.cfg["detection"])
         self.interval = 1.0 / fps
+        # Empty aisle: check less often. Full rate resumes on the next frame with a person in it.
+        idle_fps = float(engine.cfg["detection"].get("idle_analysis_fps") or fps)
+        self.idle_interval = 1.0 / min(idle_fps, fps)
         keep = engine.cfg["clips"]["pre_seconds"] + engine.cfg["clips"]["post_seconds"] + 10
         self.annotations: deque[tuple[float, dict]] = deque(maxlen=int(keep * fps) + 10)
         self.last_result = None  # (ts, persons, items, bags)
@@ -116,7 +122,8 @@ class CameraWorker(threading.Thread):
             for d in dets:
                 log.info("[%s] DETECTION track=%s score=%.2f %s", self.id, d.track_id, d.score, d.reason)
                 self.engine.on_detection(self, d)
-            self._stop.wait(max(0.0, self.interval - (time.time() - t0)))
+            interval = self.interval if persons or self.detector.busy() else self.idle_interval
+            self._stop.wait(max(0.0, interval - (time.time() - t0)))
 
     # ---------- live view ----------
     def overlay_jpeg(self) -> bytes | None:
@@ -165,6 +172,8 @@ class CameraWorker(threading.Thread):
             "analysis_ms": round(self.analysis_ms),
             "people": len(res[1]) if res and time.time() - res[0] < 2 else 0,
             "size": self.camera.frame_size,
+            "added_from": self.added_from,
+            "brand": self.brand,
         }
 
 
@@ -177,8 +186,10 @@ class Engine:
         self.clips_dir = self.data_dir / "clips"
         self.thumbs_dir = self.data_dir / "thumbs"
         self.zones = Zones(self.data_dir / "zones.json")
+        self.camera_list = CameraList(self.data_dir / "cameras.json")  # added from the dashboard
         self.object_model = None
         self.workers: dict[str, CameraWorker] = {}
+        self._workers_lock = threading.Lock()
         self.listeners: list = []  # callables(event_dict) e.g. live UI refresh
         self._stop = threading.Event()
 
@@ -190,15 +201,39 @@ class Engine:
             log.exception("object model failed to load; continuing with pose only")
         for cam in self.cfg["cameras"]:
             if cam.get("enabled", True):
-                w = CameraWorker(self, cam)
-                self.workers[w.id] = w
-                w.start()
+                self._start_worker(dict(cam, added_from="config"))
+        for cam in self.camera_list.all():
+            if cam["id"] not in self.workers:
+                self._start_worker(dict(cam, added_from="dashboard"))
         threading.Thread(target=self._housekeeping, daemon=True, name="housekeeping").start()
 
     def stop(self):
         self._stop.set()
-        for w in self.workers.values():
+        for w in list(self.workers.values()):
             w.stop()
+
+    # ---------- cameras added and removed while running ----------
+    def _start_worker(self, cam: dict) -> "CameraWorker":
+        w = CameraWorker(self, cam)
+        with self._workers_lock:
+            self.workers = {**self.workers, w.id: w}  # swap, so readers never see a half-updated dict
+        w.start()
+        return w
+
+    def add_camera(self, name: str, source: str, brand: str) -> "CameraWorker":
+        cam = self.camera_list.add(name, source, brand, taken=set(self.workers))
+        return self._start_worker(dict(cam, added_from="dashboard"))
+
+    def remove_camera(self, cam_id: str) -> bool:
+        """Only cameras added from the dashboard; config.yaml cameras are edited in that file."""
+        w = self.workers.get(cam_id)
+        if not w or w.added_from != "dashboard":
+            return False
+        self.camera_list.remove(cam_id)
+        with self._workers_lock:
+            self.workers = {k: v for k, v in self.workers.items() if k != cam_id}
+        w.stop()
+        return True
 
     # ---------- incidents ----------
     def on_detection(self, worker: CameraWorker, det: Detection):

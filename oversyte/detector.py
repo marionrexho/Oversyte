@@ -37,6 +37,9 @@ class FrameAnalyzer:
         self.cfg = det_cfg
         self.device = det_cfg.get("device", "cpu")
         self.imgsz = int(det_cfg["imgsz"])
+        # NVIDIA GPUs run the models about twice as fast in 16-bit; CPUs don't support it.
+        self.half = str(self.device).lower() not in ("cpu", "mps")
+        self._extra = {"half": True} if self.half else {}
         self.pose = _load(det_cfg["pose_model"])
         self.objects = shared_object_model
         self._obj_lock = threading.Lock()
@@ -50,7 +53,7 @@ class FrameAnalyzer:
         res = self.pose.track(
             frame, persist=True, tracker="bytetrack.yaml", classes=[0],
             conf=float(self.cfg["person_conf"]), imgsz=self.imgsz,
-            device=self.device, verbose=False,
+            device=self.device, verbose=False, **self._extra,
         )[0]
         persons: list[Person] = []
         if res.boxes is not None and res.boxes.id is not None and res.keypoints is not None:
@@ -66,7 +69,7 @@ class FrameAnalyzer:
                 r = self.objects.predict(
                     frame, classes=list(BAG_CLASSES) + list(ITEM_CLASSES),
                     conf=float(self.cfg["object_conf"]), imgsz=self.imgsz,
-                    device=self.device, verbose=False,
+                    device=self.device, verbose=False, **self._extra,
                 )[0]
             if r.boxes is not None:
                 for b, c in zip(r.boxes.xyxy.cpu().numpy(), r.boxes.cls.int().cpu().numpy()):

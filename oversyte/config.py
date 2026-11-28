@@ -20,6 +20,7 @@ DEFAULTS = {
         "object_model": "models/yolo11n.pt",
         "device": "cpu",
         "analysis_fps": 6,
+        "idle_analysis_fps": 2,     # while nobody is in view: enough to notice someone walking in
         "imgsz": 640,
         "person_conf": 0.4,
         "object_conf": 0.25,

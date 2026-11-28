@@ -23,7 +23,7 @@ def _even(n: int) -> int:
 
 
 class Camera(threading.Thread):
-    def __init__(self, cam_cfg: dict, clip_cfg: dict):
+    def __init__(self, cam_cfg: dict, clip_cfg: dict, analysis_fps: float = 0.0):
         super().__init__(daemon=True, name=f"cam-{cam_cfg['id']}")
         self.id: str = cam_cfg["id"]
         self.name: str = cam_cfg["name"]
@@ -31,6 +31,10 @@ class Camera(threading.Thread):
         self.loop: bool = bool(cam_cfg.get("loop", False))
         self.max_width: int = int(clip_cfg["max_width"])
         self.buffer_fps: float = float(clip_cfg["fps"])
+        # Every frame is decoded (the video stream requires it), but only this many per second
+        # are turned into pictures: enough for the clip buffer and for the AI. Converting and
+        # resizing every frame of a 25-30 fps camera was most of the capture CPU cost.
+        self.use_fps: float = max(self.buffer_fps, float(analysis_fps))
         seconds = float(clip_cfg["pre_seconds"]) + float(clip_cfg["post_seconds"]) + 8
         self._buffer: deque[tuple[float, bytes]] = deque(maxlen=int(seconds * self.buffer_fps))
         self._lock = threading.Lock()
@@ -103,17 +107,19 @@ class Camera(threading.Thread):
             file_fps = 25.0
         frame_interval = 1.0 / file_fps
         last_buffered = 0.0
+        last_used = 0.0
+        use_interval = 1.0 / self.use_fps
         fails = 0
         fps_count, fps_t0 = 0, time.time()
         next_t = time.time()
         while not self._stop.is_set():
-            ok, frame = cap.read()
-            if (not ok or frame is None) and is_file and self.loop:
+            ok = cap.grab()  # decode only; the picture is made below when it's needed
+            if not ok and is_file and self.loop:
                 # looping demo/test video: rewind in place, so the camera never shows as offline
                 cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                ok, frame = cap.read()
+                ok = cap.grab()
                 next_t = time.time()
-            if not ok or frame is None:
+            if not ok:
                 fails += 1
                 if is_file or fails > 30:
                     return
@@ -127,20 +133,26 @@ class Camera(threading.Thread):
                     time.sleep(delay)
                 else:
                     next_t = time.time()
-            frame = self._resize(frame)
             now = time.time()
+            fps_count += 1
+            if now - fps_t0 >= 2:
+                self.measured_fps = fps_count / (now - fps_t0)
+                fps_count, fps_t0 = 0, now
+            if now - last_used < use_interval * 0.9:
+                continue  # nobody needs this frame: skip the conversion and resize
+            ok, frame = cap.retrieve()
+            if not ok or frame is None:
+                continue
+            last_used = now
+            frame = self._resize(frame)
             with self._lock:
                 self._latest, self._latest_ts, self._latest_jpeg = frame, now, None
-            if now - last_buffered >= 1.0 / self.buffer_fps:
+            if now - last_buffered >= 1.0 / self.buffer_fps * 0.9:
                 last_buffered = now
                 ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 82])
                 if ok:
                     with self._lock:
                         self._buffer.append((now, buf.tobytes()))
-            fps_count += 1
-            if now - fps_t0 >= 2:
-                self.measured_fps = fps_count / (now - fps_t0)
-                fps_count, fps_t0 = 0, now
 
     def _resize(self, frame: np.ndarray) -> np.ndarray:
         h, w = frame.shape[:2]

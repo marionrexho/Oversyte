@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import csv
 import hashlib
 import hmac
@@ -23,7 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import evaluation
+from . import camera_setup, evaluation
 from .engine import Engine
 from .push import Pusher
 from .storage import STATUSES, Store
@@ -110,6 +111,26 @@ class ZonesBody(BaseModel):
 
 class TestBody(BaseModel):
     camera_id: str | None = None
+
+
+class CameraBody(BaseModel):
+    """What the Add camera wizard sends. `url` is only used for brand "other"."""
+    brand: str
+    name: str = ""
+    host: str = ""
+    port: int | None = None
+    username: str = ""
+    password: str = ""
+    channel: int = 1
+    substream: bool = True
+    url: str = ""
+
+    def stream_url(self) -> str:
+        try:
+            return camera_setup.build_url(self.brand, self.host, self.port, self.username,
+                                          self.password, self.channel, self.substream, self.url)
+        except camera_setup.SetupError as e:
+            raise HTTPException(400, str(e))
 
 
 def create_app(cfg: dict) -> FastAPI:
@@ -330,6 +351,33 @@ def create_app(cfg: dict) -> FastAPI:
     @app.get("/api/cameras", dependencies=[Depends(auth)])
     def cameras():
         return [w.status() for w in engine.workers.values()]
+
+    # Add camera wizard: test a camera's address (returns a snapshot), then save it.
+    @app.post("/api/cameras/test", dependencies=[Depends(auth)])
+    async def test_camera(body: CameraBody):
+        url = body.stream_url()
+        res = await run_in_threadpool(camera_setup.probe, url)
+        jpeg = res.pop("jpeg", None)
+        if jpeg:
+            res["snapshot"] = "data:image/jpeg;base64," + base64.b64encode(jpeg).decode()
+        res["address"] = camera_setup.mask(url)
+        return res
+
+    @app.post("/api/cameras", dependencies=[Depends(auth)])
+    def add_camera(body: CameraBody):
+        url = body.stream_url()
+        if any(w.camera.source == url for w in engine.workers.values()):
+            raise HTTPException(409, "This camera is already connected")
+        w = engine.add_camera(body.name, url, body.brand)
+        return w.status()
+
+    @app.delete("/api/cameras/{cam_id}", dependencies=[Depends(auth)])
+    def remove_camera(cam_id: str):
+        w = worker(cam_id)
+        if w.added_from != "dashboard":
+            raise HTTPException(400, "This camera is set up in config.yaml; remove it there.")
+        engine.remove_camera(cam_id)
+        return {"ok": True}
 
     @app.get("/api/cameras/{cam_id}/snapshot.jpg", dependencies=[Depends(auth)])
     def snapshot(cam_id: str, overlay: int = 0):
