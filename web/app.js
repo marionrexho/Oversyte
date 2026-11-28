@@ -1270,6 +1270,8 @@
     const s = $("#s", view);
     const sub = await currentSub().catch(() => null);
     const devices = await api("/api/push/devices");
+    const users = DEMO ? [] : await api("/api/users");
+    const meId = state.me.user?.id;
     const mine = sub && devices.find((d) => d.endpoint === sub.endpoint);
     let savedName = "";
     try { savedName = localStorage.getItem("oversyte-device") || ""; } catch (_) {}
@@ -1318,6 +1320,21 @@
             <p>Signed in to ${esc(state.me.store_name)}.</p></div></div>
           <button class="btn" id="logout">${I.logout}Sign out</button>
         </div>
+        ${DEMO ? "" : `<div class="card stack">
+          <div class="card-head"><span class="ico-tile violet">${I.lock}</span><div class="grow"><h2>Team</h2>
+            <p>People who can sign in to this dashboard. Only add staff you trust: they see every clip.</p></div></div>
+          ${users.length ? `<div class="list">${users.map((u) => `<div class="item"><div class="grow"><b>${esc(u.name)}</b>
+            <div class="small muted">${esc(u.email)}${u.id === meId ? " · you" : ""}</div></div>
+            ${u.id === meId || users.length < 2 ? "" : `<button class="linkbtn danger small" data-user="${u.id}">Remove</button>`}</div>`).join("")}</div>` : ""}
+          <details class="adv" id="adduser"><summary>Add a team member</summary>
+            <form class="stack" id="userform" style="margin-top:12px">
+              <label class="field"><span>Name</span><input type="text" name="name" required maxlength="60"></label>
+              <label class="field"><span>Email</span><input type="text" name="email" required inputmode="email" autocomplete="off"></label>
+              <label class="field"><span>Temporary password (at least 8 characters)</span><input type="password" name="password" required minlength="8" autocomplete="new-password"></label>
+              <button class="btn primary" type="submit">${I.plus}Add team member</button>
+              <p class="small muted" style="margin:0">Give them the email and password in person; they sign in at this dashboard's address.</p>
+            </form></details>
+        </div>`}
       </div>`;
 
     $("#test", s).onclick = (e) => sendTest(null, e.currentTarget);
@@ -1332,12 +1349,28 @@
       await sub.unsubscribe().catch(() => {});
       toast("Alerts turned off for this device"); settingsView();
     });
-    $$(".list .linkbtn", s).forEach((b) => (b.onclick = async () => {
+    $$(".list .linkbtn[data-i]", s).forEach((b) => (b.onclick = async () => {
       const d = devices[+b.dataset.i];
       if (!confirm(`Stop sending alerts to "${d.label}"?`)) return;
       await api("/api/push/unsubscribe", { method: "POST", body: { endpoint: d.endpoint } });
       if (sub && d.endpoint === sub.endpoint) await sub.unsubscribe().catch(() => {});
       settingsView();
+    }));
+    $("#userform", s)?.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const fd = e.target.elements, btn = $("button[type=submit]", e.target);
+      btn.disabled = true;
+      try {
+        const u = await api("/api/users", { method: "POST",
+          body: { name: fd.name.value.trim(), email: fd.email.value.trim(), password: fd.password.value } });
+        toast(`${u.name} can now sign in`); settingsView();
+      } catch (err) { handleErr(err); btn.disabled = false; }
+    });
+    $$("[data-user]", s).forEach((b) => (b.onclick = async () => {
+      const u = users.find((x) => x.id === +b.dataset.user);
+      if (!confirm(`Remove ${u.name}'s account? They won't be able to sign in any more.`)) return;
+      try { await api(`/api/users/${u.id}`, { method: "DELETE" }); toast(`${u.name} removed`); settingsView(); }
+      catch (err) { handleErr(err); }
     }));
     $("#logout", s).onclick = async () => { await api("/api/logout", { method: "POST" }); state.me.authed = false; renderLogin(); };
   }

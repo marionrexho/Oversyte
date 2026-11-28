@@ -8,6 +8,7 @@ import hashlib
 import hmac
 import io
 import json
+import logging
 import mimetypes
 import secrets
 import shutil
@@ -31,6 +32,9 @@ from .storage import STATUSES, Store
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 _SECRET = b""
+MIN_PASSWORD = 8
+DEFAULT_PASSWORD = "change-me"  # the shipped placeholder; never accepted as a real password
+log = logging.getLogger("oversyte.server")
 
 
 def signed_thumb_url(name: str) -> str:
@@ -148,6 +152,9 @@ def create_app(cfg: dict) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        if not store.has_users():
+            log.warning("No accounts yet: the first person to open the dashboard creates the owner "
+                        "account. Do that before exposing this server to the internet.")
         engine.start()
         yield
         engine.stop()
@@ -169,6 +176,10 @@ def create_app(cfg: dict) -> FastAPI:
 
     def auth(request: Request):
         if not request.session.get("ok"):
+            raise HTTPException(401, "Sign in required")
+        uid = request.session.get("user_id")
+        if uid is not None and store.get_user(int(uid)) is None:  # account was removed
+            request.session.clear()
             raise HTTPException(401, "Sign in required")
 
     def worker(cam_id: str):
@@ -195,22 +206,29 @@ def create_app(cfg: dict) -> FastAPI:
         return {"authed": bool(request.session.get("ok")), "store_name": cfg["store_name"],
                 "cameras": len(engine.workers),  # only cameras that are switched on
                 "team_mode": bool(cfg.get("team_mode", True)),
+                # Signup only creates the store's first (owner) account. After that, people are
+                # added by someone already signed in (Settings -> Team).
+                "signup_open": not store.has_users(),
                 "user": _public_user(user)}
+
+    def _new_user(body: SignupBody) -> dict:
+        name, email, password = body.name.strip(), _norm_email(body.email), body.password
+        if len(name) < 2:
+            raise HTTPException(400, "Enter a name")
+        if "@" not in email or len(email) < 5:
+            raise HTTPException(400, "Enter a valid email")
+        if len(password) < MIN_PASSWORD:
+            raise HTTPException(400, f"Use a password of at least {MIN_PASSWORD} characters")
+        if store.get_user_by_email(email):
+            raise HTTPException(409, "An account already exists for that email")
+        return store.add_user(name, email, _hash_password(password))
 
     @app.post("/api/signup")
     async def signup(body: SignupBody, request: Request):
-        name = body.name.strip()
-        email = _norm_email(body.email)
-        password = body.password
-        if len(name) < 2:
-            raise HTTPException(400, "Enter your name")
-        if "@" not in email or len(email) < 5:
-            raise HTTPException(400, "Enter a valid email")
-        if len(password) < 4:
-            raise HTTPException(400, "Pick a stronger password")
-        if store.get_user_by_email(email):
-            raise HTTPException(409, "An account already exists for that email")
-        user = store.add_user(name, email, _hash_password(password))
+        if store.has_users():
+            raise HTTPException(403, "This store already has an owner account. "
+                                     "Ask them to add you in Settings → Team.")
+        user = _new_user(body)
         request.session.clear()
         request.session["ok"] = True
         request.session["user_id"] = user["id"]
@@ -223,28 +241,51 @@ def create_app(cfg: dict) -> FastAPI:
         email = _norm_email(body.email) if body.email else ""
         password = body.password
         user = store.get_user_by_email(email) if email else None
-        if user:
-            if not _verify_password(password, user["password_hash"]):
-                raise HTTPException(401, "Wrong email or password")
+        if user and _verify_password(password, user["password_hash"]):
             request.session.clear()
             request.session["ok"] = True
             request.session["user_id"] = user["id"]
             request.session["user_name"] = user["name"]
             request.session["user_email"] = user["email"]
             return {"ok": True, "user": _public_user(user)}
-        if hmac.compare_digest(password.encode(), str(cfg["dashboard_password"]).encode()):
+        # The shared store password from config.yaml, kept for existing installs. Never the
+        # shipped default: an install nobody configured must not open with "change-me".
+        legacy = str(cfg.get("dashboard_password") or "")
+        if (not user and legacy and legacy != DEFAULT_PASSWORD
+                and hmac.compare_digest(password.encode(), legacy.encode())):
             request.session.clear()
             request.session["ok"] = True
             request.session["legacy_ok"] = True
             request.session["user_name"] = cfg["store_name"]
             request.session["user_email"] = ""
             return {"ok": True, "legacy": True}
+        # Same pause for every failure, so guessing is slow and the timing doesn't reveal
+        # which emails have accounts.
         await asyncio.sleep(1.0)
         raise HTTPException(401, "Wrong email or password")
 
     @app.post("/api/logout")
     def logout(request: Request):
         request.session.clear()
+        return {"ok": True}
+
+    # ---------- team (accounts) ----------
+    @app.get("/api/users", dependencies=[Depends(auth)])
+    def users():
+        return [_public_user(u) | {"created": u["created"]} for u in store.list_users()]
+
+    @app.post("/api/users", dependencies=[Depends(auth)])
+    def add_user(body: SignupBody):
+        return _public_user(_new_user(body))
+
+    @app.delete("/api/users/{user_id}", dependencies=[Depends(auth)])
+    def remove_user(user_id: int, request: Request):
+        if request.session.get("user_id") == user_id:
+            raise HTTPException(400, "You can't remove your own account")
+        if len(store.list_users()) <= 1:  # zero accounts would reopen signup to anyone
+            raise HTTPException(400, "The store needs at least one account")
+        if not store.delete_user(user_id):
+            raise HTTPException(404, "Unknown account")
         return {"ok": True}
 
     # ---------- incidents ----------

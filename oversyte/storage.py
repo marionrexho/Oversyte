@@ -156,6 +156,12 @@ class Store:
     def has_users(self) -> bool:
         return bool(self._all("SELECT 1 FROM users LIMIT 1"))
 
+    def list_users(self) -> list[dict]:
+        return self._all("SELECT * FROM users ORDER BY created")
+
+    def delete_user(self, user_id: int) -> bool:
+        return self._exec("DELETE FROM users WHERE id = ?", (user_id,)).rowcount > 0
+
     # ---- push subscriptions ----
     def add_sub(self, sub: dict, label: str):
         self._exec("INSERT OR REPLACE INTO push_subs (endpoint, data, label, created) VALUES (?, ?, ?, ?)",

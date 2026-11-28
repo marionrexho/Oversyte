@@ -2,7 +2,8 @@
   const $ = (sel, root = document) => root.querySelector(sel);
   const next = (() => {
     const raw = new URLSearchParams(location.search).get("next") || "/";
-    return raw.startsWith("/") ? raw : "/";
+    // only paths on this site: "//other.site" and "/\other.site" would leave it
+    return /^\/(?![\/\\])/.test(raw) ? raw : "/";
   })();
 
   const icons = {
@@ -61,6 +62,18 @@
       }
       if (me.store_name && $("#store-name")) $("#store-name").textContent = me.store_name;
       if (me.store_name && $("#store-name-inline")) $("#store-name-inline").textContent = me.store_name;
+      // Only the store's first account can sign up; everyone else is added from Settings -> Team.
+      const sw = $(".auth-switch");
+      if (page === "login" && sw) {
+        if (me.signup_open) sw.innerHTML = `Setting up this store? <a href="/auth/signup">Create the owner account</a>`;
+        else sw.textContent = "Need an account? Ask your store owner to add you.";
+      }
+      if (page === "signup" && me.signup_open === false && form) {
+        form.innerHTML = `<img class="logo" src="/brand/oversyte-logo-sm.png" alt="Oversyte">
+          <div class="auth-heading"><h2>Ask your store owner</h2>
+          <p>This store already has an owner account. They can add you in Settings → Team.</p></div>
+          <a class="btn primary block signin" href="/auth/login">Go to sign in</a>`;
+      }
     } catch (_) {}
   };
 
